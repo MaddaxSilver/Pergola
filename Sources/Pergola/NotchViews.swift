@@ -186,7 +186,8 @@ struct NotchRootView: View {
                 // just before the bottom edge, so the glass only shows where the pill meets the desktop.
                 // Closed it's solid; opening, its lower part eases away to reveal the glass.
                 BlackFade(top: art ? 0 : 1, bottom: ui.expanded || drop ? 0 : 1,
-                          start: fadeStart, end: fadeStart + span * (drop ? 0.5 : 0.8))
+                          // Open, the fade begins a little later so it is shorter and the black above it stays solid.
+                          start: fadeStart + (drop ? 0 : span * 0.18), end: fadeStart + span * (drop ? 0.5 : 0.8))
                 if art {
                     // Keep the menu bar edge and hardware notch seamless above the album colours.
                     LinearGradient(colors: [.black.opacity(0.55), .black.opacity(0)], startPoint: .top, endPoint: .bottom)
