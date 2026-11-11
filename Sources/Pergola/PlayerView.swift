@@ -39,6 +39,7 @@ struct PlayerView: View {
                     .frame(maxHeight: .infinity, alignment: .center) // level with the middle of the art
             }
             .frame(height: 54)
+            .padding(.leading, -6) // the art sits a little further out than the controls below it
 
             ProgressBar(player: player, tint: tint)
                 .padding(.top, 9)
