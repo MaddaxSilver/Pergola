@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key>
+    <string>com.pergola.Pergola</string>
+    <key>CFBundleName</key>
+    <string>Pergola</string>
+    <key>CFBundleDisplayName</key>
+    <string>Pergola</string>
+    <key>CFBundleExecutable</key>
+    <string>Pergola</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>0.1.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>26.0</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
+    <key>NSCalendarsFullAccessUsageDescription</key>
+    <string>Pergola shows your upcoming events from Calendar, including Google calendars you've added to your Mac.</string>
+    <key>LSUIElement</key>
+    <true/>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>NSAudioCaptureUsageDescription</key>
+    <string>Pergola listens to your music app's audio only while it is playing, to draw the live waveform. It stops within two seconds of pausing and never records other apps.</string>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>Pergola reads what's playing in Music or Spotify and sends play, pause and skip commands to it.</string>
+    <key>NSBluetoothAlwaysUsageDescription</key>
+    <string>Pergola shows your AirPods and other Bluetooth devices, with their battery levels, when they connect.</string>
+    <key>NSLocationUsageDescription</key>
+    <string>Pergola uses your approximate location to show local weather.</string>
+    <key>NSLocationWhenInUseUsageDescription</key>
+    <string>Pergola uses your approximate location to show local weather.</string>
+</dict>
+</plist>

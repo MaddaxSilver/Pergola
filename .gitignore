@@ -1,0 +1,9 @@
+.build/
+build/
+.swiftpm/
+.DS_Store
+*.xcuserstate
+xcuserdata/
+DerivedData/
+# Third-party code kept locally for experiments; not part of Pergola.
+Vendor/
