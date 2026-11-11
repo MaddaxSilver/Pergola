@@ -57,7 +57,7 @@ final class NotchUI {
     /// Live horizontal offset while a swipe is in progress.
     var dragOffset: CGFloat = 0
 
-    static let pagerWidth: CGFloat = 354
+    static let pagerWidth: CGFloat = 348
     /// Width of the lyrics column in the big-art view (fixed, so lines never re-wrap mid-animation).
     static let lyricsWidth: CGFloat = 306
     static let dropHeight: CGFloat = 26  // the line an overlay adds under the notch
