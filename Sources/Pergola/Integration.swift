@@ -196,6 +196,11 @@ enum MCP {
             "app": ["type": "string", "description": "Your own product name, e.g. \"ChatGPT\", \"Codex\", \"Gemini\", \"Cursor\", \"Claude\". It picks the icon shown in the notch. Detected from the MCP client when left out."],
             "symbol": ["type": "string", "description": "SF Symbol name for the icon. Leave out to get your product's own mark."],
             "tint": ["type": "string", "description": "Ring colour as hex, e.g. \"#D97757\". Leave out for your product's colour."]] as [String: Any]] as [String: Any]],
+        ["name": "start_timer",
+         "description": "Start a countdown timer in the Mac's notch (Pergola). It shows the time left beside the notch, chimes and shows a tick when it ends. Cancel it with end_activity and the returned id.",
+         "inputSchema": ["type": "object", "required": ["duration"], "properties": [
+            "duration": ["type": "string", "description": "How long, e.g. \"5m\", \"90s\", \"1h30m\", \"2:30\" or a number of seconds."],
+            "title": ["type": "string", "description": "What it is for, e.g. \"Tea\". Defaults to \"Timer\"."]] as [String: Any]] as [String: Any]],
         ["name": "end_activity",
          "description": "Finish a task shown with show_activity. It shows a tick (or a cross if failed) for a few seconds, then leaves the notch.",
          "inputSchema": ["type": "object", "required": ["id"], "properties": [
@@ -267,6 +272,13 @@ enum MCP {
             if body["symbol"] == nil, AIBrand.match(app) == nil { body["symbol"] = "sparkle" }
             let (s, j) = api("POST", "/activity", body)
             return describe(s, j, "Shown in the notch.")
+        case "start_timer":
+            let text = (args["duration"] as? String) ?? (args["duration"] as? NSNumber).map { "\($0)" } ?? ""
+            guard let body = PergolaCLI.timerBody(duration: text, title: args["title"] as? String) else {
+                return ("Couldn't read that duration. Try \"5m\", \"90s\" or \"1h30m\".", true)
+            }
+            let (s, j) = api("POST", "/activity", body)
+            return describe(s, j, "Timer started (id \(body["id"] ?? "")).")
         case "end_activity":
             var body: [String: Any] = ["id": args["id"] ?? "", "state": args["state"] as? String ?? "done"]
             if let d = args["detail"] { body["detail"] = d }
@@ -292,6 +304,7 @@ enum MCP {
 ///     Pergola --mcp                         MCP server over stdio (for Claude Desktop and other clients)
 ///     Pergola --activity '{"id": …}'        create or update an activity
 ///     Pergola --end-activity <id>           remove one
+///     Pergola --timer 5m [title]            start a countdown ("90s", "1h30m", "2:30" also work)
 ///     Pergola --claude-hook                 Claude Code hook: reads the hook's JSON on stdin
 ///
 /// Each runs without starting the app's UI, and exits.
@@ -305,10 +318,26 @@ enum PergolaCLI {
             if status != 200 { FileHandle.standardError.write(Data("\((json as? [String: Any])?["error"] ?? "Pergola isn't reachable")\n".utf8)) }
             exit(status == 200 ? 0 : 1)
         }
+        if let i = args.firstIndex(of: "--timer"), i + 1 < args.count {
+            let title = args.count > i + 2 ? args[(i + 2)...].joined(separator: " ") : nil
+            guard let body = timerBody(duration: args[i + 1], title: title) else {
+                FileHandle.standardError.write(Data("Couldn't read that duration. Try 5m, 90s or 1h30m.\n".utf8))
+                exit(2)
+            }
+            exit(http("POST", "/activity", body).0 == 200 ? 0 : 1)
+        }
         if let i = args.firstIndex(of: "--end-activity"), i + 1 < args.count {
             let id = args[i + 1].addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? args[i + 1]
             exit(http("DELETE", "/activity/\(id)", nil).0 == 200 ? 0 : 1)
         }
+    }
+
+    /// The activity that is a Pergola timer: a countdown that chimes when it ends.
+    static func timerBody(duration: String, title: String?) -> [String: Any]? {
+        guard let seconds = DurationText.seconds(duration) else { return nil }
+        let name = title.flatMap { $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : $0 } ?? "Timer"
+        return ["id": "timer-\(UUID().uuidString.prefix(8).lowercased())", "app": "Pergola", "title": name,
+                "detail": DurationText.spoken(seconds), "symbol": "timer", "tint": "#FF9F0A", "timer": seconds, "chime": true]
     }
 
     static var port: Int {

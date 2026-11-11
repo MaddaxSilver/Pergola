@@ -31,6 +31,9 @@ Fields for `POST /activity` (send `Content-Type: application/json`):
 | `bundle_id` | Show this app's own icon instead of a symbol. |
 | `tint` | Ring colour as hex, e.g. `#34C759`. |
 | `ttl` | Seconds without an update before a running activity is dropped (default 600). |
+| `timer` | Seconds to count down from now. The notch shows the time left, then a tick (and a chime) when it ends. |
+| `ends_at` | The same, as a Unix time to count down to. |
+| `elapsed` | `true` to count up from now instead (a call, a recording). `since` takes a Unix start time. |
 | `rings` | Up to four goals drawn as concentric rings instead of one progress ring: `[{"label": "Crypto", "value": "$4.20 / $10", "progress": 0.42, "tint": "#5BBF6A"}]`. `progress` 1 is the goal; below 0 the ring runs backwards in red. An activity with rings is standing information: it gives way to real tasks beside the closed notch. |
 | `quiet` | `true` to arrive and change without a caption under the notch. |
 
@@ -68,6 +71,10 @@ hooks to `~/.claude/settings.json`. From then on each Claude Code session shows 
 ("Editing NotchViews.swift", "Running tests"), fills the ring as it works through its task list,
 turns orange when it needs you, and ticks when it finishes.
 
+**Timers and calls.** `Pergola --timer 5m Tea` starts a countdown (`90s`, `1h30m` and `2:30` work too);
+MCP clients have a `start_timer` tool. Pergola also shows timers running in the Clock app, and how
+long you have been on a FaceTime, Zoom, Teams, Webex, Discord, Slack, WhatsApp or Signal call.
+
 **Other AI tools (ChatGPT, Codex, Gemini, Cursor, Copilot…).** Each gets its own mark in the notch:
 its real app icon when that app is installed, otherwise a symbol in its colour. Pergola works out
 who is calling from the MCP client's name, or from `app` when a tool posts through the API or CLI:
@@ -80,8 +87,8 @@ Recognised names: Claude, ChatGPT / Codex / OpenAI, Gemini, Copilot, Cursor, Win
 Mistral, DeepSeek, Ollama / LM Studio. Sending your own `symbol`, `tint` or `bundle_id` overrides the mark.
 To connect one over MCP, give it the stdio command below (for example `codex mcp add pergola -- /Applications/Pergola.app/Contents/MacOS/Pergola --mcp`).
 
-**MCP (Claude posts its own activities).** Pergola is an MCP server with three tools:
-`show_activity`, `end_activity`, `list_activities`.
+**MCP (Claude posts its own activities).** Pergola is an MCP server with four tools:
+`show_activity`, `start_timer`, `end_activity`, `list_activities`.
 
 - Claude Code: `claude mcp add --transport http --scope user pergola http://127.0.0.1:47600/mcp`
 - Claude Desktop and other stdio clients: command `/Applications/Pergola.app/Contents/MacOS/Pergola`, argument `--mcp`

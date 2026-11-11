@@ -66,12 +66,16 @@ enum Prefs {
     static let shortcuts = "shortcuts"               // [action: {code, mods, key}]
     static let activitiesEnabled = "activitiesEnabled"
     static let ringsPage = "ringsPage"
+    static let callTimer = "callTimer"
+    static let clockTimers = "clockTimers"
     static let activityOverlay = "activityOverlay"
 
     static func registerDefaults() {
         UserDefaults.standard.register(defaults: [
             activitiesEnabled: true,
             ringsPage: true,
+            callTimer: true,
+            clockTimers: true,
             shortcutsEnabled: true,
             activityOverlay: true,
             expandOnHover: true,

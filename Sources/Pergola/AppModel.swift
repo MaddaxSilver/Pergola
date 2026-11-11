@@ -118,6 +118,7 @@ final class AppModel {
     let output = OutputWatcher()
     let activities = Activities()
     @ObservationIgnored private(set) lazy var api = PergolaAPI(activities: activities)
+    @ObservationIgnored private lazy var live = LiveWatcher(activities: activities)
 
     private var reconcileTimer: Timer?
     private var peekTask: Task<Void, Never>?
@@ -210,6 +211,7 @@ final class AppModel {
                 self?.reconcileLyrics()
                 self?.player.checkForRestart()
                 self?.activities.prune()
+                self?.live.tick()
             }
         }
     }
@@ -222,6 +224,9 @@ final class AppModel {
 
     /// Whether the closed notch has wings at all (music, or another app's activity).
     var showsWings: Bool { showsMusicWings || activities.current != nil }
+
+    /// Width of each wing beside the closed notch: wider while one holds a running clock.
+    var closedWingWidth: CGFloat { activities.current?.hasClock == true ? 46 : ui.wingWidth }
 
     private func reconcileWaveform() {
         waveform.update(

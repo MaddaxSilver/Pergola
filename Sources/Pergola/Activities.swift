@@ -34,6 +34,20 @@ struct LiveActivity: Identifiable, Equatable {
     /// that isn't the app whose icon it wears.
     var opens: String?
 
+    /// A countdown: when it reaches zero the activity finishes by itself.
+    var endsAt: Date?
+    /// How long the countdown was set for, so the ring can show how much is left.
+    var total: Double?
+    /// A count-up: a call, a recording, anything where "how long so far" is the point.
+    var since: Date?
+    /// Play a sound when the countdown ends (Pergola's own timers; Clock rings its own).
+    var chime = false
+    /// Made by Pergola from something it watches (a call, a Clock timer): never saved, since it is found again.
+    var transient = false
+
+    /// Showing a running clock instead of a progress ring.
+    var hasClock: Bool { state == .running && (endsAt != nil || since != nil) }
+
     /// What a click opens: the app named for it, else the one whose icon shows, else the AI tool's own app.
     var appToOpen: URL? {
         let ids = [opens, bundleID] + (AIBrand.match(app).map { $0.bundleIDs + ($0.name == "Claude" ? ["com.anthropic.claudefordesktop"] : []) } ?? [])
@@ -53,6 +67,10 @@ struct LiveActivity: Identifiable, Equatable {
         if let bundleID { d["bundle_id"] = bundleID }
         if !rings.isEmpty { d["rings"] = rings.map(\.json) }
         if quiet { d["quiet"] = true }
+        if let endsAt { d["ends_at"] = endsAt.timeIntervalSince1970 }
+        if let total { d["total"] = total }
+        if let since { d["since"] = since.timeIntervalSince1970 }
+        if chime { d["chime"] = true }
         return d
     }
 }
@@ -148,6 +166,9 @@ final class Activities {
     /// Goal rings never show there; they only have their own page in the open notch.
     var current: LiveActivity? {
         items.filter(\.finished).max { $0.updated < $1.updated }
+            // Then a call, then the timer that ends soonest, then whatever was touched last.
+            ?? items.filter { $0.state == .running && $0.since != nil }.max { $0.updated < $1.updated }
+            ?? items.filter { $0.state == .running && $0.endsAt != nil }.min { $0.endsAt! < $1.endsAt! }
             ?? items.filter { !$0.ambient }.max { $0.updated < $1.updated }
     }
 
@@ -171,6 +192,20 @@ final class Activities {
         if let v = d["rings"] as? [[String: Any]] { a.rings = Array(v.compactMap(GoalRing.init).prefix(4)) }
         if let v = d["quiet"] as? Bool { a.quiet = v }
         if let v = text("opens", 200) { a.opens = v }
+        // Clocks: "timer" counts down from now, "ends_at" to a moment; "elapsed"/"since" count up.
+        if let v = (d["timer"] as? NSNumber)?.doubleValue, v > 0 {
+            a.endsAt = Date().addingTimeInterval(min(v, 86_400 * 7)); a.total = v; a.since = nil
+            if d["chime"] == nil, existing == nil { a.chime = true }
+        }
+        if let v = (d["ends_at"] as? NSNumber)?.doubleValue { a.endsAt = Date(timeIntervalSince1970: v); a.since = nil }
+        if let v = (d["total"] as? NSNumber)?.doubleValue, v > 0 { a.total = v }
+        if let v = (d["since"] as? NSNumber)?.doubleValue { a.since = Date(timeIntervalSince1970: v); a.endsAt = nil }
+        if d["elapsed"] as? Bool == true, a.since == nil { a.since = Date(); a.endsAt = nil }
+        if let v = d["chime"] as? Bool { a.chime = v }
+        if let v = d["transient"] as? Bool { a.transient = v }
+        // A clock keeps itself alive: it needs no updates to stay in the notch.
+        if let end = a.endsAt, d["ttl"] == nil { a.ttl = max(a.ttl, end.timeIntervalSinceNow + 120) }
+        if a.since != nil, d["ttl"] == nil { a.ttl = max(a.ttl, 86_400) }
         if let v = d["transcript"] as? String, v.hasSuffix(".jsonl"),
            v.hasPrefix(FileManager.default.homeDirectoryForCurrentUser.path + "/.claude/") { a.transcript = v }
         if d["progress"] is NSNull { a.progress = nil }
@@ -229,6 +264,12 @@ final class Activities {
             lastTranscriptCheck = now
             checkTranscripts()
         }
+        // Countdowns that have run out finish themselves, with a tick (and a chime for Pergola's own).
+        for a in items where a.state == .running {
+            guard let end = a.endsAt, now >= end else { continue }
+            if a.chime { NSSound(named: "Glass")?.play() }
+            upsert(["id": a.id, "state": "done", "detail": "Time’s up"])
+        }
         let stale = items.filter {
             ($0.removeAt.map { now >= $0 } ?? false) || now.timeIntervalSince(max($0.updated, heartbeat[$0.id] ?? .distantPast)) > $0.ttl
         }
@@ -280,7 +321,7 @@ final class Activities {
 
     /// Tasks still running are written down, so quitting and reopening Pergola doesn't lose them.
     private func save() {
-        let live = items.filter { !$0.finished }.map { a -> [String: Any] in
+        let live = items.filter { !$0.finished && !$0.transient }.map { a -> [String: Any] in
             var d = a.json
             d["ttl"] = a.ttl
             if let t = a.transcript { d["transcript"] = t }
@@ -333,6 +374,26 @@ struct ActivityGlyph: View {
 
 /// Progress as a ring: fills as the work advances, spins while the amount is unknown, and turns into
 /// a tick or a cross at the end.
+/// The running time of a countdown ("4:59") or a call ("12:07"), ticking by itself.
+struct ActivityClock: View {
+    var activity: LiveActivity
+    var size: CGFloat
+
+    var body: some View {
+        Group {
+            if let end = activity.endsAt {
+                Text(timerInterval: Date.now...max(end, Date.now.addingTimeInterval(1)), countsDown: true)
+            } else if let since = activity.since {
+                Text(since, style: .timer)
+            }
+        }
+        .font(.system(size: size, weight: .semibold).monospacedDigit())
+        .foregroundStyle(activity.tint)
+        .lineLimit(1)
+        .minimumScaleFactor(0.7)
+    }
+}
+
 struct ActivityRing: View {
     var activity: LiveActivity
     var size: CGFloat = 16
@@ -365,6 +426,19 @@ struct ActivityRing: View {
                     .phaseAnimator([0.45, 1.0]) { dot, o in dot.opacity(o) } animation: { _ in .easeInOut(duration: 0.8) }
             case .running where !activity.rings.isEmpty:
                 EmptyView()
+            case .running where activity.endsAt != nil && (activity.total ?? 0) > 0:
+                // A countdown drains its ring; one redraw a second is plenty.
+                TimelineView(.periodic(from: .now, by: 1)) { ctx in
+                    let left = max(0, activity.endsAt!.timeIntervalSince(ctx.date)) / activity.total!
+                    Circle().trim(from: 0, to: min(1, max(0.02, left)))
+                        .stroke(activity.tint, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
+                        .rotationEffect(.degrees(-90))
+                        .animation(.linear(duration: 1), value: left)
+                }
+            case .running where activity.since != nil:
+                // A call has no "how far": a soft pulsing dot says it is live.
+                Circle().fill(activity.tint).frame(width: size * 0.36, height: size * 0.36)
+                    .phaseAnimator([0.5, 1.0]) { dot, o in dot.opacity(o) } animation: { _ in .easeInOut(duration: 0.9) }
             case .running:
                 if let p = activity.progress {
                     Circle().trim(from: 0, to: max(0.03, p))
@@ -552,10 +626,14 @@ private struct ActivityRow: View {
                 }
             }
             Spacer(minLength: 6)
-            Text(status)
-                .font(.system(size: 11, weight: .semibold).monospacedDigit())
-                .foregroundStyle(.white.opacity(0.6))
-                .contentTransition(.numericText())
+            if activity.hasClock {
+                ActivityClock(activity: activity, size: 12)
+            } else {
+                Text(status)
+                    .font(.system(size: 11, weight: .semibold).monospacedDigit())
+                    .foregroundStyle(.white.opacity(0.6))
+                    .contentTransition(.numericText())
+            }
             ActivityRing(activity: activity, size: 18)
         }
         .foregroundStyle(.white)

@@ -661,6 +661,8 @@ private struct IntegrationsPage: View {
     @AppStorage(Prefs.activitiesEnabled) private var enabled = true
     @AppStorage(Prefs.activityOverlay) private var overlay = true
     @AppStorage(Prefs.ringsPage) private var ringsPage = true
+    @AppStorage(Prefs.callTimer) private var callTimer = true
+    @AppStorage(Prefs.clockTimers) private var clockTimers = true
     @State private var hooksInstalled = ClaudeSetup.hooksInstalled
     @State private var note: String?
     @State private var otherNote: String?
@@ -683,6 +685,25 @@ private struct IntegrationsPage: View {
                 : "Other apps can't show anything in the notch while this is off.")
 
             if enabled {
+                SectionLabel(text: "Calls and Timers")
+                Card {
+                    ToggleRow(title: "Call Length", isOn: $callTimer)
+                    ToggleRow(title: "Clock Timers", isOn: $clockTimers, divider: true)
+                    LabeledRow(title: "Try It", divider: true) {
+                        HStack(spacing: 6) {
+                            pill("Timer") {
+                                if let body = PergolaCLI.timerBody(duration: "20s", title: "Test Timer") { model.activities.upsert(body) }
+                            }
+                            pill("Call") {
+                                model.activities.upsert(["id": "pergola-demo-call", "app": "FaceTime", "title": "FaceTime", "detail": "On a call",
+                                                         "symbol": "phone.fill", "tint": "#30D158", "bundle_id": "com.apple.FaceTime", "elapsed": true])
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 15) { model.activities.remove(id: "pergola-demo-call") }
+                            }
+                        }
+                    }
+                }
+                Footnote(text: "Call Length shows how long you've been on a FaceTime, Zoom, Teams, Webex, Discord, Slack, WhatsApp or Signal call, by noticing when that app is using the microphone. Clock Timers mirrors timers running in the Clock app; macOS may ask to let Pergola read Clock's data. Start a timer of Pergola's own from Terminal with: Pergola --timer 5m Tea")
+
                 SectionLabel(text: "Claude")
                 Card {
                     LabeledRow(title: "Claude Code Progress") {

@@ -65,7 +65,7 @@ struct NotchRootView: View {
         var w = ui.notchSize.width
         var h = ui.notchSize.height
         let drop = dropShown
-        if model.showsWings { w += 2 * ui.wingWidth }
+        if model.showsWings { w += 2 * model.closedWingWidth }
         if drop { h += NotchUI.dropHeight } // straight down: an overlay never makes the notch wider
         if ui.hovering { w += 10; h += 3 } // a small lift before it opens
         return CGSize(width: w, height: h)
@@ -286,9 +286,9 @@ struct CollapsedView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 0) {
-                leftWing.frame(width: ui.wingWidth, height: ui.notchSize.height)
+                leftWing.frame(width: model.closedWingWidth, height: ui.notchSize.height)
                 Spacer(minLength: ui.notchSize.width)
-                rightWing.frame(width: ui.wingWidth, height: ui.notchSize.height)
+                rightWing.frame(width: model.closedWingWidth, height: ui.notchSize.height)
             }
             .frame(height: ui.notchSize.height)
 
@@ -371,7 +371,10 @@ struct CollapsedView: View {
     // The wings never change for an overlay: album art and the waveform, or a task's icon and ring.
     @ViewBuilder private var leftWing: some View {
         Group {
-            if model.showsMusicWings {
+            if let activity = model.activities.current, activity.hasClock {
+                // A call or timer takes both wings, even over music: its icon here, its time opposite.
+                ActivityGlyph(activity: activity, size: 15)
+            } else if model.showsMusicWings {
                 ArtworkView(image: model.player.artwork, cornerRadius: 5)
                     .frame(width: ui.notchSize.height - 10, height: ui.notchSize.height - 10)
                     .offset(x: -1) // a hair away from the hardware notch
@@ -385,7 +388,11 @@ struct CollapsedView: View {
     @ViewBuilder private var rightWing: some View {
         Group {
             // An app's progress takes the right wing; music keeps its artwork on the left.
-            if let activity = model.activities.current {
+            if let activity = model.activities.current, activity.hasClock {
+                // A timer or a call shows its running time, like the Dynamic Island.
+                ActivityClock(activity: activity, size: 12.5)
+                    .padding(.horizontal, 3)
+            } else if let activity = model.activities.current {
                 ActivityRing(activity: activity, size: 20, lineWidth: 3)
             } else if model.showsMusicWings {
                 PlayingIndicator(barCount: 5)

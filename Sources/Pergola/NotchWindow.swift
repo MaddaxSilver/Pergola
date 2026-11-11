@@ -125,7 +125,7 @@ final class NotchWindowController {
     private var collapsedHotRect: NSRect {
         let s = screen.frame
         var w = ui.notchSize.width
-        if model.showsWings { w += 2 * ui.wingWidth }
+        if model.showsWings { w += 2 * model.closedWingWidth }
         // Generous margins so you don't have to hit the notch exactly.
         // The visible pill plus a small margin; the top edge counts (the pointer usually rests there).
         return NSRect(x: s.midX - w / 2 - 6, y: s.maxY - ui.notchSize.height - 6, width: w + 12, height: ui.notchSize.height + 6)

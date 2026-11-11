@@ -18,6 +18,8 @@ build it yourself.
 - **Live activities**: any app, script or AI agent on your Mac can show a task and its progress.
   Claude Code, ChatGPT / Codex, Gemini, Cursor and others each get their own mark. Click a task to
   jump to its app. See [INTEGRATIONS.md](INTEGRATIONS.md).
+- **Timers and calls**: like the Dynamic Island, the closed notch shows the time left on a timer
+  (Clock's, or one you start with `Pergola --timer 5m`) and how long you have been on a call.
 - **Goal rings**: an app can share up to four goals, drawn as rings on their own page.
 - **Overlays**: volume, brightness, battery, AirPods, sound output, Focus, song changes and task
   updates each appear as one line under the notch.
