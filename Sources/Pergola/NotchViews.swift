@@ -64,12 +64,15 @@ struct NotchRootView: View {
         if ui.expanded { return ui.expandedSize }
         var w = ui.notchSize.width
         var h = ui.notchSize.height
-        let drop = ui.peek?.dropsDown(apple: ui.appleStyleSensory) == true
+        let drop = dropShown
         if model.showsWings { w += 2 * ui.wingWidth }
         if drop { h += NotchUI.dropHeight } // straight down: an overlay never makes the notch wider
         if ui.hovering { w += 10; h += 3 } // a small lift before it opens
         return CGSize(width: w, height: h)
     }
+
+    /// An overlay's line is showing under the closed notch.
+    private var dropShown: Bool { !ui.expanded && ui.peek?.dropsDown(apple: ui.appleStyleSensory) == true }
 
     private var shape: NotchShape {
         NotchShape(topRadius: NotchMetrics.flare,
@@ -91,7 +94,7 @@ struct NotchRootView: View {
                 .overlay {
                 // A hairline rim on the open pill, like the edge of a sheet of glass. Faded out across the top
                 // band so no line ever shows along the screen edge or around the hardware notch.
-                shape.stroke(.white.opacity(ui.expanded ? 0.09 : 0), lineWidth: 1)
+                shape.stroke(.white.opacity(ui.expanded || (dropShown && liquidGlass) ? 0.09 : 0), lineWidth: 1)
                     .mask(LinearGradient(stops: [.init(color: .clear, location: 0),
                                                  .init(color: .clear, location: min(0.9, (ui.notchSize.height + 6) / max(size.height, 1))),
                                                  .init(color: .black, location: min(1, (ui.notchSize.height + 40) / max(size.height, 1)))],
@@ -108,7 +111,7 @@ struct NotchRootView: View {
                             .overlay { shape.blendMode(.destinationOut) }
                             .compositingGroup()
                     }
-                    .opacity(ui.expanded ? 1 : 0)
+                    .opacity(ui.expanded ? 1 : (dropShown ? 0.6 : 0))
             }
 
             // "Apple Style" Sensory: a floating glass capsule under the notch instead of in it.
@@ -145,7 +148,10 @@ struct NotchRootView: View {
     /// bottom edge, where the wallpaper shows through the lens. In big-art mode the album colours
     /// take over instead, with black kept only around the hardware notch.
     private var background: some View {
-        let glass = ui.expanded && liquidGlass
+        // An overlay's drop-down line gets the same treatment as the open notch: black around the
+        // hardware notch, melting into glass along the bottom.
+        let drop = dropShown
+        let glass = (ui.expanded || drop) && liquidGlass
         let art = ui.expanded && ui.bigArt
         let size = bodySize
         // The "Clear Glass ↔ Dark" slider (0.15…0.95) drives the whole look:
@@ -153,7 +159,9 @@ struct NotchRootView: View {
         //   Dark  → the black reaches about two-thirds of the way down over well-dimmed glass.
         let t = min(1, max(0, (glassDarkness - 0.15) / 0.8))
         let notchEdge = (ui.notchSize.height + 16) / max(size.height, 1)
-        let fadeStart = min(0.8, max(0.2, notchEdge + 0.32 * t))
+        let fadeStart = drop
+            ? min(0.8, (ui.notchSize.height - 4) / max(size.height, 1))
+            : min(0.8, max(0.2, notchEdge + 0.32 * t))
         let span = 1 - fadeStart
         let bottomDim = 0.8 * t
         return Color.clear.overlay(alignment: .top) {
@@ -174,7 +182,7 @@ struct NotchRootView: View {
                 // Solid black on top of the glass: everything above `fadeStart`, easing out to nothing
                 // just before the bottom edge, so the glass only shows where the pill meets the desktop.
                 // Closed it's solid; opening, its lower part eases away to reveal the glass.
-                BlackFade(top: art ? 0 : 1, bottom: ui.expanded ? 0 : 1,
+                BlackFade(top: art ? 0 : 1, bottom: ui.expanded || drop ? 0 : 1,
                           start: fadeStart, end: fadeStart + span * 0.8)
                 if art {
                     // Keep the menu bar edge and hardware notch seamless above the album colours.
