@@ -162,7 +162,7 @@ struct NotchRootView: View {
         let notchEdge = (ui.notchSize.height + 16) / max(size.height, 1)
         let fadeStart = drop
             ? min(0.8, (ui.notchSize.height - 9) / max(size.height, 1))
-            : min(0.8, max(0.2, notchEdge + 0.12 + 0.26 * t)) // solid black well past the notch, even at Clear
+            : min(0.8, max(0.2, notchEdge + 0.06 + 0.26 * t)) // solid black well past the notch, even at Clear
         let span = 1 - fadeStart
         // Even at Clear the open notch's glass is dimmed enough to read as black. An overlay's line is
         // small and brief, so there the glass is left much clearer and reads as glass.
@@ -186,8 +186,8 @@ struct NotchRootView: View {
                 // just before the bottom edge, so the glass only shows where the pill meets the desktop.
                 // Closed it's solid; opening, its lower part eases away to reveal the glass.
                 BlackFade(top: art ? 0 : 1, bottom: ui.expanded || drop ? 0 : 1,
-                          // Open, the fade begins a little later so it is shorter and the black above it stays solid.
-                          start: fadeStart + (drop ? 0 : span * 0.18), end: fadeStart + span * (drop ? 0.5 : 0.8))
+                          // Open, the fade is short and ends early, leaving a clear band of glass along the bottom.
+                          start: fadeStart + (drop ? 0 : span * 0.1), end: fadeStart + span * (drop ? 0.5 : 0.62))
                 if art {
                     // Keep the menu bar edge and hardware notch seamless above the album colours.
                     LinearGradient(colors: [.black.opacity(0.55), .black.opacity(0)], startPoint: .top, endPoint: .bottom)
