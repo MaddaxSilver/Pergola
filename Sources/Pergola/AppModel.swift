@@ -99,7 +99,7 @@ final class NotchUI {
     /// The largest the open notch ever gets (sizes the window once, so it never has to resize).
     var maxExpandedSize: CGSize { CGSize(width: 620, height: notchSize.height + 270) }
     /// Width of each "wing" beside the notch when something is shown collapsed.
-    var wingWidth: CGFloat { notchSize.height + 2 }  // art + ~6 pt each side: hugs the notch
+    var wingWidth: CGFloat { notchSize.height - 3 }  // art + ~3.5 pt each side: hugs the notch
 }
 
 @Observable @MainActor
