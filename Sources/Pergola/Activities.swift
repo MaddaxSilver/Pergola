@@ -361,11 +361,12 @@ struct ActivityGlyph: View {
         if let id = activity.bundleID, let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: id) {
             Image(nsImage: NSWorkspace.shared.icon(forFile: url.path))
                 .resizable().interpolation(.high)
-                .frame(width: size * 1.25, height: size * 1.25)
+                // App icons carry their own margin, so they need more room than a symbol to look the same size.
+                .frame(width: size * 1.65, height: size * 1.65)
         } else {
             Image(systemName: activity.symbol)
                 .symbolRenderingMode(.hierarchical)
-                .font(.system(size: size, weight: .semibold))
+                .font(.system(size: size * 1.15, weight: .semibold))
                 .foregroundStyle(activity.tint)
                 .contentTransition(.symbolEffect(.replace))
         }
@@ -612,7 +613,7 @@ private struct ActivityRow: View {
     var body: some View {
         HStack(spacing: 10) {
             ActivityGlyph(activity: activity, size: 15)
-                .frame(width: 24, height: 24)
+                .frame(width: 26, height: 26)
             VStack(alignment: .leading, spacing: 1) {
                 Text(activity.title)
                     .font(.system(size: 12.5, weight: .semibold))
