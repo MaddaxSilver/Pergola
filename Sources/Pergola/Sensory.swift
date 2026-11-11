@@ -254,6 +254,6 @@ struct AppleStyleHUD: View {
         .foregroundStyle(.white)
         .padding(.horizontal, 18)
         .frame(width: 230, height: 46)
-        .glassEffect(.regular.tint(.black.opacity(0.3)), in: Capsule())
+        .glassEffect(.regular.tint(.black.opacity(0.5)), in: Capsule())
     }
 }

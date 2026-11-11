@@ -103,7 +103,7 @@ struct SettingsView: View {
         }
         // Resizable: the window opens at a comfortable size for the screen and can grow or shrink.
         .frame(minWidth: 700, idealWidth: 760, maxWidth: .infinity, minHeight: 540, idealHeight: 760, maxHeight: .infinity)
-        .background(Color(white: 0.135))
+        .background(Color(white: 0.07))
         .background(WindowStyler())
         .environment(\.colorScheme, .dark)
         .animation(.smooth(duration: 0.25), value: page)
@@ -147,7 +147,7 @@ struct SettingsView: View {
         }
         .padding(.horizontal, 14)
         .padding(.bottom, 16)
-        .background(Color(white: 0.115))
+        .background(Color(white: 0.045))
     }
 
     private func filtered(_ pages: [SettingsPage]) -> [SettingsPage] {
@@ -187,7 +187,7 @@ private struct SidebarRow: View {
                 Image(systemName: page.symbol)
                     .font(.system(size: 13, weight: .semibold))
                     .frame(width: 30, height: 30)
-                    .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color(white: 0.2)))
+                    .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color(white: 0.16)))
                     .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(.white.opacity(0.08)))
                 Text(page.title)
                     .font(.system(size: 15, weight: .medium))
@@ -218,7 +218,7 @@ private struct WindowStyler: NSViewRepresentable {
             w.styleMask.insert(.fullSizeContentView)
             w.toolbar = nil
             w.isMovableByWindowBackground = true
-            w.backgroundColor = NSColor(white: 0.135, alpha: 1)
+            w.backgroundColor = NSColor(white: 0.07, alpha: 1)
         }
         return v
     }

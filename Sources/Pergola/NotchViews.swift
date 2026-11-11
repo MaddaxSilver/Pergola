@@ -163,7 +163,7 @@ struct NotchRootView: View {
             ? min(0.8, (ui.notchSize.height - 4) / max(size.height, 1))
             : min(0.8, max(0.2, notchEdge + 0.12 + 0.26 * t)) // solid black well past the notch, even at Clear
         let span = 1 - fadeStart
-        let bottomDim = 0.8 * t
+        let bottomDim = 0.35 + 0.6 * t // even at Clear the glass is dimmed enough to read as black
         return Color.clear.overlay(alignment: .top) {
             ZStack(alignment: .top) {
                 // Dimming sits *behind* the glass so its rim light and lensing stay crisp on top.
