@@ -54,7 +54,18 @@ final class LiveWatcher {
             if callApp != nil { endCall() }
             return
         }
-        let listening = Self.bundleIDsUsingMicrophone()
+        // Core Audio can take a moment to answer; ask off the main thread so no frame ever waits on it.
+        guard !asking else { return }
+        asking = true
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let listening = Self.bundleIDsUsingMicrophone()
+            DispatchQueue.main.async { MainActor.assumeIsolated { self?.asking = false; self?.heard(listening) } }
+        }
+    }
+
+    private var asking = false
+
+    private func heard(_ listening: [String]) {
         let found = Self.callApps.first { app in listening.contains { $0.hasPrefix(app.prefix) } }
         if let found {
             misses = 0
@@ -77,7 +88,7 @@ final class LiveWatcher {
     }
 
     /// Bundle IDs of every process currently taking audio input.
-    static func bundleIDsUsingMicrophone() -> [String] {
+    nonisolated static func bundleIDsUsingMicrophone() -> [String] {
         var list = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyProcessObjectList,
                                               mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
         var size: UInt32 = 0
@@ -104,7 +115,7 @@ final class LiveWatcher {
 
     // MARK: Clock timers
 
-    private static let clockStore = FileManager.default.homeDirectoryForCurrentUser
+    nonisolated private static let clockStore = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Group Containers/group.com.apple.mobiletimerd/local.sqlite").path
     private var clockStamp: Date?
     private var clockIDs: Set<String> = []
@@ -125,8 +136,15 @@ final class LiveWatcher {
         clockStamp = stamp
         lastFullRead = Date()
 
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let timers = Self.readClockTimers()
+            DispatchQueue.main.async { MainActor.assumeIsolated { self?.mirror(timers) } }
+        }
+    }
+
+    private func mirror(_ timers: [ClockTimer]) {
         var running: Set<String> = []
-        for t in Self.readClockTimers() where t.fires > Date() {
+        for t in timers where t.fires > Date() {
             let id = "clock-\(t.key)"
             running.insert(id)
             // Only re-post when it is new or its end moved (paused and resumed, or time added).
@@ -142,9 +160,9 @@ final class LiveWatcher {
         clockIDs = running
     }
 
-    private struct ClockTimer { var key: String; var title: String; var duration: Double; var fires: Date }
+    private struct ClockTimer: Sendable { var key: String; var title: String; var duration: Double; var fires: Date }
 
-    private static func readClockTimers() -> [ClockTimer] {
+    nonisolated private static func readClockTimers() -> [ClockTimer] {
         var db: OpaquePointer?
         guard sqlite3_open_v2(clockStore, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { sqlite3_close(db); return [] }
         defer { sqlite3_close(db) }
@@ -167,7 +185,7 @@ final class LiveWatcher {
 
     /// A running timer archives the moment it will fire; a stopped or paused one only an interval.
     /// Pull the date out of the keyed archive without needing Clock's private classes.
-    private static func fireDate(in archive: Data) -> Date? {
+    nonisolated private static func fireDate(in archive: Data) -> Date? {
         guard let plist = try? PropertyListSerialization.propertyList(from: archive, format: nil) as? [String: Any],
               let objects = plist["$objects"] as? [Any] else { return nil }
         for case let object as [String: Any] in objects {
