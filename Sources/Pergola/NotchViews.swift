@@ -94,10 +94,11 @@ struct NotchRootView: View {
                 .overlay {
                 // A hairline rim on the open pill, like the edge of a sheet of glass. Faded out across the top
                 // band so no line ever shows along the screen edge or around the hardware notch.
-                shape.stroke(.white.opacity(ui.expanded || (dropShown && liquidGlass) ? 0.09 : 0), lineWidth: 1)
+                let dropGlass = dropShown && liquidGlass
+                shape.stroke(.white.opacity(dropGlass ? 0.28 : (ui.expanded ? 0.09 : 0)), lineWidth: 1)
                     .mask(LinearGradient(stops: [.init(color: .clear, location: 0),
-                                                 .init(color: .clear, location: min(0.9, (ui.notchSize.height + 6) / max(size.height, 1))),
-                                                 .init(color: .black, location: min(1, (ui.notchSize.height + 40) / max(size.height, 1)))],
+                                                 .init(color: .clear, location: min(0.9, (ui.notchSize.height + (dropGlass ? -2 : 6)) / max(size.height, 1))),
+                                                 .init(color: .black, location: min(1, (ui.notchSize.height + (dropGlass ? 12 : 40)) / max(size.height, 1)))],
                                          startPoint: .top, endPoint: .bottom))
             }
             .background {
@@ -160,10 +161,12 @@ struct NotchRootView: View {
         let t = min(1, max(0, (glassDarkness - 0.15) / 0.8))
         let notchEdge = (ui.notchSize.height + 16) / max(size.height, 1)
         let fadeStart = drop
-            ? min(0.8, (ui.notchSize.height - 4) / max(size.height, 1))
+            ? min(0.8, (ui.notchSize.height - 9) / max(size.height, 1))
             : min(0.8, max(0.2, notchEdge + 0.12 + 0.26 * t)) // solid black well past the notch, even at Clear
         let span = 1 - fadeStart
-        let bottomDim = 0.35 + 0.6 * t // even at Clear the glass is dimmed enough to read as black
+        // Even at Clear the open notch's glass is dimmed enough to read as black. An overlay's line is
+        // small and brief, so there the glass is left much clearer and reads as glass.
+        let bottomDim = drop ? 0.08 + 0.3 * t : 0.35 + 0.6 * t
         return Color.clear.overlay(alignment: .top) {
             ZStack(alignment: .top) {
                 // Dimming sits *behind* the glass so its rim light and lensing stay crisp on top.
@@ -183,7 +186,7 @@ struct NotchRootView: View {
                 // just before the bottom edge, so the glass only shows where the pill meets the desktop.
                 // Closed it's solid; opening, its lower part eases away to reveal the glass.
                 BlackFade(top: art ? 0 : 1, bottom: ui.expanded || drop ? 0 : 1,
-                          start: fadeStart, end: fadeStart + span * 0.8)
+                          start: fadeStart, end: fadeStart + span * (drop ? 0.5 : 0.8))
                 if art {
                     // Keep the menu bar edge and hardware notch seamless above the album colours.
                     LinearGradient(colors: [.black.opacity(0.55), .black.opacity(0)], startPoint: .top, endPoint: .bottom)
