@@ -161,7 +161,7 @@ struct NotchRootView: View {
         let notchEdge = (ui.notchSize.height + 16) / max(size.height, 1)
         let fadeStart = drop
             ? min(0.8, (ui.notchSize.height - 4) / max(size.height, 1))
-            : min(0.8, max(0.2, notchEdge + 0.32 * t))
+            : min(0.8, max(0.2, notchEdge + 0.12 + 0.26 * t)) // solid black well past the notch, even at Clear
         let span = 1 - fadeStart
         let bottomDim = 0.8 * t
         return Color.clear.overlay(alignment: .top) {
@@ -370,6 +370,7 @@ struct CollapsedView: View {
             if model.showsMusicWings {
                 ArtworkView(image: model.player.artwork, cornerRadius: 5)
                     .frame(width: ui.notchSize.height - 10, height: ui.notchSize.height - 10)
+                    .offset(x: -1) // a hair away from the hardware notch
             } else if let activity = model.activities.current {
                 ActivityGlyph(activity: activity, size: 14)
             }
