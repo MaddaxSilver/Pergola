@@ -29,7 +29,7 @@ final class LiveWatcher {
 
     /// Apps whose use of the microphone means a call. Matched by prefix, so helper processes count.
     /// macOS has no public "is there a call" API, but Core Audio does say which app is listening.
-    private static let callApps: [(prefix: String, name: String, bundleID: String)] = [
+    nonisolated private static let callApps: [(prefix: String, name: String, bundleID: String)] = [
         ("com.apple.avconferenced", "FaceTime", "com.apple.FaceTime"),
         ("com.apple.FaceTime", "FaceTime", "com.apple.FaceTime"),
         ("com.apple.TelephonyUtilities", "FaceTime", "com.apple.FaceTime"),
@@ -45,6 +45,31 @@ final class LiveWatcher {
         ("ru.keepcoder.Telegram", "Telegram", "ru.keepcoder.Telegram"),
         ("com.facebook.archon", "Messenger", "com.facebook.archon"),
     ]
+    /// Browsers: their use of the microphone is only a call if a tab is on a call site (it may just
+    /// as well be dictation), so the open tabs are checked, by AppleScript, only while they listen.
+    nonisolated private static let browsers: [(prefix: String, app: String, bundleID: String)] = [
+        ("com.google.Chrome", "Google Chrome", "com.google.Chrome"),
+        ("company.thebrowser.Browser", "Arc", "company.thebrowser.Browser"),
+        ("com.microsoft.edgemac", "Microsoft Edge", "com.microsoft.edgemac"),
+        ("com.brave.Browser", "Brave Browser", "com.brave.Browser"),
+        ("com.vivaldi.Vivaldi", "Vivaldi", "com.vivaldi.Vivaldi"),
+        ("com.apple.Safari", "Safari", "com.apple.Safari"),
+        ("com.apple.WebKit", "Safari", "com.apple.Safari"),
+    ]
+    /// Call sites, matched against the host and path of each open tab.
+    nonisolated private static let callSites: [(match: String, name: String)] = [
+        ("meet.google.com/", "Meet"),
+        ("zoom.us/wc", "Zoom"), ("app.zoom.us/wc", "Zoom"),
+        ("teams.microsoft.com", "Teams"), ("teams.live.com", "Teams"),
+        ("discord.com/channels", "Discord"),
+        ("app.slack.com/huddle", "Slack"),
+        ("facetime.apple.com", "FaceTime"),
+        ("whereby.com/", "Whereby"),
+        ("webex.com/", "Webex"),
+        ("meet.jit.si/", "Jitsi"),
+        ("web.whatsapp.com", "WhatsApp"),
+        ("messenger.com/", "Messenger"),
+    ]
     static let callID = "pergola-call"
     private var callApp: String?
     private var misses = 0
@@ -57,16 +82,60 @@ final class LiveWatcher {
         // Core Audio can take a moment to answer; ask off the main thread so no frame ever waits on it.
         guard !asking else { return }
         asking = true
+        let current = callApp
+        let lastSite = lastSiteCheck
         DispatchQueue.global(qos: .utility).async { [weak self] in
             let listening = Self.bundleIDsUsingMicrophone()
-            DispatchQueue.main.async { MainActor.assumeIsolated { self?.asking = false; self?.heard(listening) } }
+            var found = Self.callApps.first { app in listening.contains { $0.hasPrefix(app.prefix) } }
+                .map { (name: $0.name, bundleID: $0.bundleID) }
+            var checkedSites = false
+            if found == nil, let browser = Self.browsers.first(where: { b in listening.contains { $0.hasPrefix(b.prefix) } }) {
+                // Asking the browser costs a little, so once a call is known it's re-checked less often.
+                let due = Date().timeIntervalSince(lastSite) >= (current == nil ? 2 : 10)
+                if !due, let current {
+                    found = (name: current, bundleID: browser.bundleID)
+                } else if let site = Self.callSite(in: browser.app) {
+                    checkedSites = true
+                    found = (name: site, bundleID: browser.bundleID)
+                } else {
+                    checkedSites = true
+                }
+            }
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    self.asking = false
+                    if checkedSites { self.lastSiteCheck = Date() }
+                    self.heard(found)
+                }
+            }
         }
     }
 
     private var asking = false
+    private var lastSiteCheck = Date.distantPast
 
-    private func heard(_ listening: [String]) {
-        let found = Self.callApps.first { app in listening.contains { $0.hasPrefix(app.prefix) } }
+    /// The call site open in one of the browser's tabs, if any. Runs `osascript` so a slow or
+    /// unanswered browser can never hold anything up; gives up after two seconds.
+    nonisolated private static func callSite(in app: String) -> String? {
+        let script = app == "Safari"
+            ? "tell application \"Safari\" to get URL of every tab of every window"
+            : "tell application \"\(app)\" to get URL of every tab of every window"
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        p.arguments = ["-e", "if application \"\(app)\" is running then", "-e", script, "-e", "end if"]
+        let out = Pipe()
+        p.standardOutput = out
+        p.standardError = FileHandle.nullDevice
+        do { try p.run() } catch { return nil }
+        let deadline = Date().addingTimeInterval(2)
+        while p.isRunning, Date() < deadline { usleep(20_000) }
+        if p.isRunning { p.terminate(); return nil }
+        let text = String(data: out.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?.lowercased() ?? ""
+        return callSites.first { text.contains($0.match) }?.name
+    }
+
+    private func heard(_ found: (name: String, bundleID: String)?) {
         if let found {
             misses = 0
             guard callApp != found.name else { return }

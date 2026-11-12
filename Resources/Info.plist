@@ -29,7 +29,7 @@
     <key>NSAudioCaptureUsageDescription</key>
     <string>Pergola listens to your music app's audio only while it is playing, to draw the live waveform. It stops within two seconds of pausing and never records other apps.</string>
     <key>NSAppleEventsUsageDescription</key>
-    <string>Pergola reads what's playing in Music or Spotify and sends play, pause and skip commands to it.</string>
+    <string>Pergola reads what's playing in Music or Spotify and sends play, pause and skip commands to it. While your browser is using the microphone, it also checks whether a tab is on a call site such as Google Meet, to show the call's length.</string>
     <key>NSBluetoothAlwaysUsageDescription</key>
     <string>Pergola shows your AirPods and other Bluetooth devices, with their battery levels, when they connect.</string>
     <key>NSLocationUsageDescription</key>
