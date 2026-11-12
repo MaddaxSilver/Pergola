@@ -211,6 +211,7 @@ struct NotchRootView: View {
                 // Laid out once at the open size, so nothing inside reflows while the notch springs open:
                 // the growing outline simply reveals content that's already in place.
                 .frame(width: ui.expandedSize.width, height: ui.expandedSize.height, alignment: .top)
+                .overlay(alignment: .top) { OpenWings() }
                 // Opacity + scale only: these run on the GPU compositor for free, where a blur over the
                 // whole open notch costs a full offscreen pass every frame and makes the spring stutter.
                 .transition(.asymmetric(
@@ -370,44 +371,8 @@ struct CollapsedView: View {
         }
     }
 
-    // The wings never change for an overlay: album art and the waveform, or a task's icon and ring.
-    @ViewBuilder private var leftWing: some View {
-        Group {
-            if let coin = model.coin {
-                // A coin toss borrows both wings: the coin spins where the ring goes, the result lands here.
-                CoinResult(heads: coin.heads).id(coin.toss)
-            } else if let activity = model.activities.current, activity.hasClock {
-                // A call or timer takes both wings, even over music: its icon here, its time opposite.
-                ActivityGlyph(activity: activity, size: 15)
-            } else if model.showsMusicWings {
-                ArtworkView(image: model.player.artwork, cornerRadius: 5)
-                    .frame(width: ui.notchSize.height - 10, height: ui.notchSize.height - 10)
-                    .offset(x: -1) // a hair away from the hardware notch
-            } else if let activity = model.activities.current {
-                ActivityGlyph(activity: activity, size: 14)
-            }
-        }
-        .transition(.riseFromBelow)
-    }
-
-    @ViewBuilder private var rightWing: some View {
-        Group {
-            // An app's progress takes the right wing; music keeps its artwork on the left.
-            if let coin = model.coin {
-                CoinSpin(heads: coin.heads).id(coin.toss)
-            } else if let activity = model.activities.current, activity.hasClock {
-                // A timer or a call shows its running time, like the Dynamic Island.
-                ActivityClock(activity: activity, size: 12.5)
-                    .padding(.horizontal, 3)
-            } else if let activity = model.activities.current {
-                ActivityRing(activity: activity, size: 20, lineWidth: 3)
-            } else if model.showsMusicWings {
-                PlayingIndicator(barCount: 5)
-                    .frame(width: 22, height: ui.notchSize.height * 0.4)
-            }
-        }
-        .transition(.riseFromBelow)
-    }
+    private var leftWing: some View { NotchWing(side: .left, music: true) }
+    private var rightWing: some View { NotchWing(side: .right, music: true) }
 
     /// "Alex’s AirPods Pro" → "AirPods Pro", so it fits beside the notch.
     static func shortName(_ name: String) -> String {
@@ -420,6 +385,81 @@ struct CollapsedView: View {
 
 /// The open notch is a horizontal pager: Files ← Media → Weather.
 /// All pages sit side by side and the whole strip follows your fingers, like an iOS page view.
+/// What sits in the strip beside the hardware notch: album art and the waveform, or a task's icon
+/// and ring, or a timer's icon and time. The wings never change for an overlay.
+struct NotchWing: View {
+    enum Side { case left, right }
+    var side: Side
+    /// The closed notch shows music here; the open one leaves music to its own page.
+    var music: Bool
+    @Environment(AppModel.self) private var model
+    private var ui: NotchUI { model.ui }
+
+    var body: some View {
+        Group {
+            switch side {
+            case .left: left
+            case .right: right
+            }
+        }
+        .transition(.riseFromBelow)
+    }
+
+    @ViewBuilder private var left: some View {
+        if let coin = model.coin {
+            // A coin toss borrows both wings: the coin spins where the ring goes, the result lands here.
+            CoinResult(heads: coin.heads).id(coin.toss)
+        } else if let activity = model.activities.current, activity.hasClock {
+            // A call or timer takes both wings, even over music: its icon here, its time opposite.
+            ActivityGlyph(activity: activity, size: 15)
+        } else if music, model.showsMusicWings {
+            ArtworkView(image: model.player.artwork, cornerRadius: 5)
+                .frame(width: ui.notchSize.height - 10, height: ui.notchSize.height - 10)
+                .offset(x: -1) // a hair away from the hardware notch
+        } else if let activity = model.activities.current {
+            ActivityGlyph(activity: activity, size: 14)
+        }
+    }
+
+    @ViewBuilder private var right: some View {
+        // An app's progress takes the right wing; music keeps its artwork on the left.
+        if let coin = model.coin {
+            CoinSpin(heads: coin.heads).id(coin.toss)
+        } else if let activity = model.activities.current, activity.hasClock {
+            // A timer or a call shows its running time, like the Dynamic Island.
+            ActivityClock(activity: activity, size: 12.5)
+                .padding(.horizontal, 3)
+        } else if let activity = model.activities.current {
+            ActivityRing(activity: activity, size: 20, lineWidth: 3)
+        } else if music, model.showsMusicWings {
+            PlayingIndicator(barCount: 5)
+                .frame(width: 22, height: ui.notchSize.height * 0.4)
+        }
+    }
+}
+
+/// The open notch keeps the running activity in the strip either side of the hardware notch, on
+/// every page but the media one (whose own content reaches up into that strip).
+struct OpenWings: View {
+    @Environment(AppModel.self) private var model
+    private var ui: NotchUI { model.ui }
+
+    private var shown: Bool {
+        ui.tab != .player && !ui.bigArt && (model.activities.current != nil || model.coin != nil)
+    }
+
+    var body: some View {
+        HStack(spacing: 0) {
+            if shown { NotchWing(side: .left, music: false).frame(width: model.closedWingWidth) }
+            Color.clear.frame(width: ui.notchSize.width)
+            if shown { NotchWing(side: .right, music: false).frame(width: model.closedWingWidth) }
+        }
+        .frame(height: ui.notchSize.height)
+        .animation(.spring(duration: 0.35, bounce: 0.15), value: shown)
+        .allowsHitTesting(false)
+    }
+}
+
 struct ExpandedView: View {
     @Environment(AppModel.self) private var model
     private var ui: NotchUI { model.ui }

@@ -266,7 +266,8 @@ final class AppModel {
     }
 
     func showPeek(_ peek: Peek, seconds customSeconds: Double? = nil) {
-        guard !ui.expanded else { return }
+        // Overlays belong to the closed notch; a coin toss also has a place in the open one.
+        if ui.expanded { guard case .coin = peek else { return } }
         peekTask?.cancel()
         // Repeated volume presses update the level in place instead of re-animating the whole overlay.
         if ui.peek?.isSensory == true, peek.isSensory {
