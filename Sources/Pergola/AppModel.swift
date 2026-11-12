@@ -10,6 +10,8 @@ enum Peek: Equatable {
     case focus(name: String, symbol: String, on: Bool)
     /// Another app's task started, finished or needs you.
     case activity(title: String, status: String, state: LiveActivity.State)
+    /// A coin toss; `toss` tells one flip from the next so a repeat spins again.
+    case coin(heads: Bool, toss: Int)
 
     /// Every overlay drops a line down from under the notch. (Apple-style volume/brightness floats
     /// in its own capsule instead.)
@@ -122,6 +124,7 @@ final class AppModel {
 
     private var reconcileTimer: Timer?
     private var peekTask: Task<Void, Never>?
+    private var coinTosses = 0
 
     func start() {
         player.onTrackChange = { [weak self] in
@@ -187,6 +190,7 @@ final class AppModel {
         // Debug: PERGOLA_PEEK=volume|brightness|focus|output|airpods|charging shows that overlay for 60 s.
         if let which = ProcessInfo.processInfo.environment["PERGOLA_PEEK"] {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                if which == "coin" { self?.flipCoin(); return }
                 let peek: Peek = switch which {
                 case "brightness": .sensory(.brightness, level: 0.62, muted: false)
                 case "focus": .focus(name: "Do Not Disturb", symbol: "moon.fill", on: true)
@@ -245,6 +249,12 @@ final class AppModel {
     private func reconcileLyrics() {
         guard player.hasTrack else { return }
         lyrics.load(title: player.title, artist: player.artist, album: player.album, duration: player.duration)
+    }
+
+    /// Tosses a coin under the closed notch: it spins, lands, and says which side came up.
+    func flipCoin() {
+        coinTosses += 1
+        showPeek(.coin(heads: Bool.random(), toss: coinTosses), seconds: 3.4)
     }
 
     func showPeek(_ peek: Peek, seconds customSeconds: Double? = nil) {

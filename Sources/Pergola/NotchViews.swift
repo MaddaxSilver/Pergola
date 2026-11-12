@@ -336,6 +336,8 @@ struct CollapsedView: View {
             MarqueeText(text: [model.player.title, model.player.artist].filter { !$0.isEmpty }.joined(separator: " — "))
                 .font(.system(size: 12.5, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.88))
+        case .coin(let heads, let toss):
+            CoinToss(heads: heads).id(toss)
         case .activity(let title, let status, let state):
             HStack(spacing: 6) {
                 label(title)

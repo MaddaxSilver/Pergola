@@ -4,7 +4,7 @@ import Carbon.HIToolbox
 
 /// Things a global keyboard shortcut can do.
 enum ShortcutAction: String, CaseIterable, Identifiable {
-    case toggleNotch, bigArt, previousPage, nextPage, playPause, nextTrack, previousTrack, favorite, settings
+    case toggleNotch, bigArt, previousPage, nextPage, playPause, nextTrack, previousTrack, favorite, coinFlip, settings
 
     var id: String { rawValue }
 
@@ -18,6 +18,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .nextTrack: "Next Song"
         case .previousTrack: "Previous Song"
         case .favorite: "Favorite This Song"
+        case .coinFlip: "Flip a Coin"
         case .settings: "Open Settings"
         }
     }
@@ -35,6 +36,7 @@ enum ShortcutAction: String, CaseIterable, Identifiable {
         case .playPause: KeyCombo(keyCode: kVK_Space, mods: m, key: "Space")
         case .nextTrack: KeyCombo(keyCode: kVK_ANSI_Period, mods: m, key: ".")
         case .previousTrack: KeyCombo(keyCode: kVK_ANSI_Comma, mods: m, key: ",")
+        case .coinFlip: KeyCombo(keyCode: kVK_ANSI_F, mods: m, key: "F")
         default: nil
         }
     }
@@ -206,6 +208,7 @@ final class Shortcuts {
         case .nextTrack: if model.player.hasTrack { model.player.next() }
         case .previousTrack: if model.player.hasTrack { model.player.previous() }
         case .favorite: if model.player.hasTrack { model.player.toggleFavorite() }
+        case .coinFlip: model.flipCoin()
         case .settings: AppDelegate.openSettings()
         }
     }
@@ -233,6 +236,8 @@ struct ShortcutsPage: View {
                 SectionLabel(text: "Music")
                 Card { rows(ShortcutAction.media) }
 
+                SectionLabel(text: "Fun")
+                Card { rows([.coinFlip]) }
                 SectionLabel(text: "Pergola")
                 Card {
                     rows([.settings])
