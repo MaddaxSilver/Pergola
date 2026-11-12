@@ -444,8 +444,15 @@ struct OpenWings: View {
     @Environment(AppModel.self) private var model
     private var ui: NotchUI { model.ui }
 
-    private var shown: Bool {
-        ui.tab != .player && !ui.bigArt && (model.activities.current != nil || model.coin != nil)
+    private var hasSomething: Bool { !ui.bigArt && (model.activities.current != nil || model.coin != nil) }
+
+    /// 1 away from the media page, 0 on it, and in between while a page is sliding: follows the
+    /// swipe itself, so the icons fade with the finger rather than snapping when the page settles.
+    private var awayFromMedia: CGFloat {
+        let pages = ui.pages
+        guard let media = pages.firstIndex(of: .player), let here = pages.firstIndex(of: ui.tab) else { return 1 }
+        let offset = CGFloat(media - here) * NotchUI.pagerWidth + ui.dragOffset
+        return min(1, abs(offset) / (NotchUI.pagerWidth * 0.6))
     }
 
     var body: some View {
@@ -457,9 +464,10 @@ struct OpenWings: View {
             NotchWing(side: .right, music: false).frame(width: model.closedWingWidth)
         }
         .frame(height: ui.notchSize.height)
-        .opacity(shown ? 1 : 0)
-        .scaleEffect(shown ? 1 : 0.85)
-        .animation(.easeInOut(duration: 0.3), value: shown)
+        .opacity(awayFromMedia)
+        .scaleEffect(0.85 + 0.15 * awayFromMedia)
+        .opacity(hasSomething ? 1 : 0)
+        .animation(.easeInOut(duration: 0.3), value: hasSomething)
         .allowsHitTesting(false)
     }
 }
