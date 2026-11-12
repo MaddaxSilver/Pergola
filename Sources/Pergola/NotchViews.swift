@@ -449,13 +449,17 @@ struct OpenWings: View {
     }
 
     var body: some View {
+        // Always in place and only faded, so going to and from the media page is a soft cross-fade
+        // rather than the icons popping in and out.
         HStack(spacing: 0) {
-            if shown { NotchWing(side: .left, music: false).frame(width: model.closedWingWidth) }
+            NotchWing(side: .left, music: false).frame(width: model.closedWingWidth)
             Color.clear.frame(width: ui.notchSize.width)
-            if shown { NotchWing(side: .right, music: false).frame(width: model.closedWingWidth) }
+            NotchWing(side: .right, music: false).frame(width: model.closedWingWidth)
         }
         .frame(height: ui.notchSize.height)
-        .animation(.spring(duration: 0.35, bounce: 0.15), value: shown)
+        .opacity(shown ? 1 : 0)
+        .scaleEffect(shown ? 1 : 0.85)
+        .animation(.easeInOut(duration: 0.3), value: shown)
         .allowsHitTesting(false)
     }
 }
