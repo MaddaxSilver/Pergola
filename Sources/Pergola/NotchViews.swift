@@ -336,8 +336,8 @@ struct CollapsedView: View {
             MarqueeText(text: [model.player.title, model.player.artist].filter { !$0.isEmpty }.joined(separator: " — "))
                 .font(.system(size: 12.5, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.88))
-        case .coin(let heads, let toss):
-            CoinToss(heads: heads).id(toss)
+        case .coin:
+            EmptyView()
         case .activity(let title, let status, let state):
             HStack(spacing: 6) {
                 label(title)
@@ -373,7 +373,10 @@ struct CollapsedView: View {
     // The wings never change for an overlay: album art and the waveform, or a task's icon and ring.
     @ViewBuilder private var leftWing: some View {
         Group {
-            if let activity = model.activities.current, activity.hasClock {
+            if let coin = model.coin {
+                // A coin toss borrows both wings: the coin spins where the ring goes, the result lands here.
+                CoinResult(heads: coin.heads).id(coin.toss)
+            } else if let activity = model.activities.current, activity.hasClock {
                 // A call or timer takes both wings, even over music: its icon here, its time opposite.
                 ActivityGlyph(activity: activity, size: 15)
             } else if model.showsMusicWings {
@@ -390,7 +393,9 @@ struct CollapsedView: View {
     @ViewBuilder private var rightWing: some View {
         Group {
             // An app's progress takes the right wing; music keeps its artwork on the left.
-            if let activity = model.activities.current, activity.hasClock {
+            if let coin = model.coin {
+                CoinSpin(heads: coin.heads).id(coin.toss)
+            } else if let activity = model.activities.current, activity.hasClock {
                 // A timer or a call shows its running time, like the Dynamic Island.
                 ActivityClock(activity: activity, size: 12.5)
                     .padding(.horizontal, 3)

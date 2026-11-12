@@ -16,7 +16,11 @@ enum Peek: Equatable {
     /// Every overlay drops a line down from under the notch. (Apple-style volume/brightness floats
     /// in its own capsule instead.)
     func dropsDown(apple: Bool) -> Bool {
-        if case .sensory = self { !apple } else { true }
+        switch self {
+        case .sensory: !apple
+        case .coin: false   // the coin lives in the wings, so the notch stays thin
+        default: true
+        }
     }
 
     var isSensory: Bool { if case .sensory = self { true } else { false } }
@@ -227,10 +231,14 @@ final class AppModel {
     }
 
     /// Whether the closed notch has wings at all (music, or another app's activity).
-    var showsWings: Bool { showsMusicWings || activities.current != nil }
+    var showsWings: Bool { showsMusicWings || activities.current != nil || coin != nil }
+    /// A coin toss in flight or just landed: it borrows both wings for a few seconds.
+    var coin: (heads: Bool, toss: Int)? {
+        if case .coin(let heads, let toss) = ui.peek { (heads, toss) } else { nil }
+    }
 
     /// Width of each wing beside the closed notch: wider while one holds a running clock.
-    var closedWingWidth: CGFloat { activities.current?.hasClock == true ? 46 : ui.wingWidth }
+    var closedWingWidth: CGFloat { coin != nil || activities.current?.hasClock == true ? 46 : ui.wingWidth }
 
     private func reconcileWaveform() {
         waveform.update(

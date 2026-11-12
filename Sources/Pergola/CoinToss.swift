@@ -32,47 +32,50 @@ private struct Coin: View, Animatable {
     }
 }
 
-/// The coin-flip line under the notch: the coin tosses, lands, then the result is spelled out.
-struct CoinToss: View {
+/// How long the coin is in the air before it settles.
+private let coinFlight = 1.0
+
+/// The coin in the notch's right wing: it tosses, spins and lands on its side.
+struct CoinSpin: View {
     var heads: Bool
     @State private var angle: Double = 0
     @State private var lift: CGFloat = 0
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        Coin(angle: angle, size: 19)
+            .scaleEffect(1 + lift * 0.14)
+            .accessibilityHidden(true)
+            .task {
+                let end: Double = heads ? 1800 : 1980
+                if reduceMotion { angle = end; return }
+                // Fast at first, slowing into the landing, the way a tossed coin settles.
+                withAnimation(.timingCurve(0.2, 0.7, 0.25, 1, duration: coinFlight)) { angle = end }
+                withAnimation(.easeOut(duration: coinFlight * 0.45)) { lift = 1 }
+                try? await Task.sleep(for: .seconds(coinFlight * 0.45))
+                withAnimation(.easeIn(duration: coinFlight * 0.45)) { lift = 0 }
+            }
+    }
+}
+
+/// The result in the left wing, spelled out once the coin has landed.
+struct CoinResult: View {
+    var heads: Bool
     @State private var landed = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    private static let flight = 1.0
-
     var body: some View {
-        HStack(spacing: 7) {
-            Coin(angle: angle, size: 17)
-                .scaleEffect(1 + lift * 0.18)
-                .offset(y: -lift * 2)
-            // Sized for the longer word from the start, so nothing shifts when the result appears.
-            ZStack(alignment: .leading) {
-                Text("Heads").hidden()
-                Text(heads ? "Heads" : "Tails")
-                    .opacity(landed ? 1 : 0)
-                    .offset(x: landed ? 0 : -6)
-            }
+        Text(heads ? "Heads" : "Tails")
             .font(.system(size: 12.5, weight: .semibold))
-            .foregroundStyle(.white.opacity(0.9))
-        }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(landed ? (heads ? "Heads" : "Tails") : "Flipping a coin")
-        .task {
-            let end: Double = heads ? 1800 : 1980
-            if reduceMotion {
-                angle = end
-                withAnimation(.smooth(duration: 0.25)) { landed = true }
-                return
+            .foregroundStyle(Color(red: 1.0, green: 0.8, blue: 0.27))
+            .lineLimit(1)
+            .fixedSize()
+            .opacity(landed ? 1 : 0)
+            .scaleEffect(landed ? 1 : 0.7)
+            .accessibilityLabel(landed ? (heads ? "Heads" : "Tails") : "Flipping a coin")
+            .task {
+                if !reduceMotion { try? await Task.sleep(for: .seconds(coinFlight * 0.92)) }
+                withAnimation(.spring(duration: 0.35, bounce: 0.3)) { landed = true }
             }
-            // Fast at first, slowing into the landing, the way a tossed coin settles.
-            withAnimation(.timingCurve(0.2, 0.7, 0.25, 1, duration: Self.flight)) { angle = end }
-            withAnimation(.easeOut(duration: Self.flight * 0.45)) { lift = 1 }
-            try? await Task.sleep(for: .seconds(Self.flight * 0.45))
-            withAnimation(.easeIn(duration: Self.flight * 0.45)) { lift = 0 }
-            try? await Task.sleep(for: .seconds(Self.flight * 0.47))
-            withAnimation(.spring(duration: 0.35, bounce: 0.3)) { landed = true }
-        }
     }
 }
