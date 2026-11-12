@@ -4,11 +4,19 @@ import SwiftUI
 enum PlayerApp: String {
     case music = "com.apple.Music"
     case spotify = "com.spotify.client"
+    /// A browser or another app, through the system's now-playing information (see WebMedia).
+    case web = "web"
 
-    var scriptName: String { self == .music ? "Music" : "Spotify" }
+    var scriptName: String {
+        switch self { case .music: "Music"; case .spotify: "Spotify"; case .web: "your browser" }
+    }
 
-    var isRunning: Bool { !NSRunningApplication.runningApplications(withBundleIdentifier: rawValue).isEmpty }
-    var pid: pid_t? { NSRunningApplication.runningApplications(withBundleIdentifier: rawValue).first?.processIdentifier }
+    var isRunning: Bool {
+        self == .web || !NSRunningApplication.runningApplications(withBundleIdentifier: rawValue).isEmpty
+    }
+    var pid: pid_t? {
+        self == .web ? nil : NSRunningApplication.runningApplications(withBundleIdentifier: rawValue).first?.processIdentifier
+    }
 }
 
 /// Tracks what's playing in Apple Music or Spotify.
@@ -40,6 +48,12 @@ final class NowPlaying {
     private var artworkKey = ""
 
     var hasTrack: Bool { source != nil && !title.isEmpty }
+    /// The browser (or other app) behind a `.web` source.
+    private(set) var webBundleID: String?
+    /// Shuffle, repeat and favourite only work with Music and Spotify.
+    var hasModes: Bool { source != .web }
+    @ObservationIgnored let web = WebMedia()
+    @ObservationIgnored private var webArtworkID = -1
     var pid: pid_t? { source?.pid }
 
     func currentPosition(at date: Date = .now) -> Double {
@@ -83,18 +97,55 @@ final class NowPlaying {
         NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didTerminateApplicationNotification, object: nil, queue: .main) { [weak self] n in
             let id = (n.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication)?.bundleIdentifier
             MainActor.assumeIsolated {
-                guard let self, let id, id == self.source?.rawValue else { return }
+                guard let self, let id, id == self.source?.rawValue || (self.source == .web && id == self.webBundleID) else { return }
                 self.clear()
             }
         }
         loadInitialState()
+        web.onChange = { [weak self] track in self?.handleWeb(track) }
+        web.setEnabled(Prefs.d.bool(forKey: Prefs.webMedia))
+    }
+
+    /// Browser music (and other players) from the system's now-playing information.
+    private func handleWeb(_ track: WebTrack?) {
+        guard let track, allowed(.web) else {
+            if source == .web { clear() }
+            return
+        }
+        // Don't let a paused browser steal the notch from Music or Spotify playing.
+        if let source, source != .web, isPlaying, !track.playing { return }
+        if source != .web { source = .web }
+        webBundleID = track.bundleID
+        if title != track.title { title = track.title }
+        if artist != track.artist { artist = track.artist }
+        if album != track.album { album = track.album }
+        let settling = Date().timeIntervalSince(commandedAt) < 1.2
+        if !settling, isPlaying != track.playing { isPlaying = track.playing }
+        duration = track.duration
+        position = track.elapsed
+        positionDate = track.stamp
+        shuffle = false; repeatMode = 0; favorited = false
+
+        let key = "web|\(track.bundleID)|\(title)|\(artist)"
+        if key != trackKey {
+            trackKey = key
+            webArtworkID = -1
+            if track.playing { onTrackChange?() }
+        }
+        if track.artworkID != webArtworkID {
+            webArtworkID = track.artworkID
+            if let image = track.artwork { setArtwork(image, for: key) }
+            else if artworkKey != key {
+                withAnimation(.spring(duration: 0.5)) { artwork = nil; accent = .white }
+            }
+        }
     }
 
     private func allowed(_ app: PlayerApp) -> Bool {
         switch Prefs.d.string(forKey: Prefs.playerSource) {
         case "music": app == .music
         case "spotify": app == .spotify
-        default: true
+        default: app != .web || Prefs.d.bool(forKey: Prefs.webMedia)
         }
     }
 
@@ -128,6 +179,8 @@ final class NowPlaying {
         case .spotify:
             duration = ((info["Duration"] as? NSNumber)?.doubleValue ?? 0) / 1000
             if let pos = (info["Playback Position"] as? NSNumber)?.doubleValue { setPosition(pos) }
+        case .web:
+            break
         }
 
         let key = "\(app.rawValue)|\(title)|\(artist)|\(album)"
@@ -147,7 +200,7 @@ final class NowPlaying {
     }
 
     private func clear() {
-        source = nil; title = ""; artist = ""; album = ""; artwork = nil
+        source = nil; title = ""; artist = ""; album = ""; artwork = nil; webBundleID = nil
         isPlaying = false; duration = 0; position = 0; trackKey = ""
     }
 
@@ -186,7 +239,7 @@ final class NowPlaying {
     /// Reads the playback position in the background. The time is stamped the moment the player
     /// answers, so the progress bar stays exact however long the answer takes to come back.
     func syncPosition() {
-        guard let app = source, app.isRunning else { return }
+        guard let app = source, app != .web, app.isRunning else { return }
         let key = trackKey
         AppleScript.fetch("tell application \"\(app.scriptName)\" to player position",
                           { ($0.doubleValue, Date()) }) { [weak self] result in
@@ -198,7 +251,7 @@ final class NowPlaying {
 
     /// Shuffle, repeat and favourite in a single round trip.
     private func syncModes() {
-        guard let app = source, app.isRunning else { return }
+        guard let app = source, app != .web, app.isRunning else { return }
         let key = trackKey
         switch app {
         case .music:
@@ -230,6 +283,8 @@ final class NowPlaying {
                 guard let self, let (sh, rep) = r, self.trackKey == key else { return }
                 self.shuffle = sh; self.repeatMode = rep ? 2 : 0
             }
+        case .web:
+            break
         }
     }
 
@@ -238,6 +293,11 @@ final class NowPlaying {
     /// Commands are sent in the background (in order), so a button press never waits on the player.
     private func send(_ command: String) {
         guard let app = source, app.isRunning else { return }
+        if app == .web {
+            let map: [String: WebMedia.Command] = ["play": .play, "pause": .pause, "next track": .next, "previous track": .previous]
+            if let c = map[command] { web.send(c) }
+            return
+        }
         AppleScript.send("tell application \"\(app.scriptName)\" to \(command)")
     }
 
@@ -261,7 +321,7 @@ final class NowPlaying {
         confirmToken += 1
         let token = confirmToken
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.25) { [weak self] in
-            guard let self, self.confirmToken == token, let app = self.source, app.isRunning else { return }
+            guard let self, self.confirmToken == token, let app = self.source, app != .web, app.isRunning else { return }
             AppleScript.fetch("tell application \"\(app.scriptName)\" to return (player state is playing)",
                               { $0.booleanValue }) { [weak self] playing in
                 guard let self, self.confirmToken == token, let playing, playing != self.isPlaying else { return }
@@ -276,11 +336,12 @@ final class NowPlaying {
 
     func seek(to seconds: Double) {
         setPosition(seconds)
+        if source == .web { web.seek(to: seconds); return }
         send("set player position to \(seconds)")
     }
 
     func toggleShuffle() {
-        guard let app = source else { return }
+        guard let app = source, app != .web else { return }
         shuffle.toggle()
         send(app == .music ? "set shuffle enabled to \(shuffle)" : "set shuffling to \(shuffle)")
     }
@@ -293,7 +354,7 @@ final class NowPlaying {
     }
 
     func cycleRepeat() {
-        guard let app = source else { return }
+        guard let app = source, app != .web else { return }
         switch app {
         case .music:
             // Same order as Apple Music's own button: off → repeat all → repeat one → off.
@@ -302,12 +363,14 @@ final class NowPlaying {
         case .spotify:
             repeatMode = repeatMode == 0 ? 2 : 0
             send("set repeating to \(repeatMode != 0)")
+        case .web:
+            break
         }
     }
 
     func openPlayer() {
         guard let app = source,
-              let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: app.rawValue) else { return }
+              let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: app == .web ? (webBundleID ?? "") : app.rawValue) else { return }
         NSWorkspace.shared.openApplication(at: url, configuration: .init())
     }
 
@@ -329,6 +392,8 @@ final class NowPlaying {
                 guard let self, let s, let url = URL(string: s) else { return }
                 Task { await self.downloadArtwork(url, for: key) }
             }
+        case .web:
+            break // arrives with the stream
         }
     }
 

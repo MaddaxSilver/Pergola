@@ -15,7 +15,36 @@ cp Resources/Info.plist "$APP/Contents/Info.plist"
 # Render the app icon from code (Sources/Pergola/Icons.swift).
 "$BIN" --write-icon "$APP/Contents/Resources/AppIcon.icns"
 
+# Browser music: MediaRemote Adapter (BSD-3-Clause, ThirdParty/mediaremote-adapter) reads what any app,
+# browsers included, reports as now playing. macOS only lets Apple's own programs ask, so Pergola runs it
+# inside /usr/bin/perl. Built here as a small framework next to the script that loads it.
+MRA=ThirdParty/mediaremote-adapter
+FW="$APP/Contents/Resources/MediaRemoteAdapter.framework"
+mkdir -p "$FW/Versions/A/Resources"
+clang -dynamiclib -fobjc-arc -fvisibility=default -O2 -arch arm64 -arch x86_64 -mmacosx-version-min=14.0 \
+    -I"$MRA/include" -I"$MRA/src" "$MRA"/src/adapter/*.m "$MRA"/src/private/*.m "$MRA"/src/utility/*.m \
+    -framework Foundation -framework AppKit -framework UniformTypeIdentifiers \
+    -install_name @rpath/MediaRemoteAdapter.framework/Versions/A/MediaRemoteAdapter \
+    -o "$FW/Versions/A/MediaRemoteAdapter"
+cat > "$FW/Versions/A/Resources/Info.plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleExecutable</key><string>MediaRemoteAdapter</string>
+<key>CFBundleIdentifier</key><string>com.pergola.MediaRemoteAdapter</string>
+<key>CFBundleName</key><string>MediaRemoteAdapter</string>
+<key>CFBundlePackageType</key><string>FMWK</string>
+<key>CFBundleShortVersionString</key><string>0.1</string>
+<key>CFBundleVersion</key><string>0.1.0</string>
+</dict></plist>
+PLIST
+ln -sfn A "$FW/Versions/Current"
+ln -sfn Versions/Current/MediaRemoteAdapter "$FW/MediaRemoteAdapter"
+ln -sfn Versions/Current/Resources "$FW/Resources"
+cp "$MRA/bin/mediaremote-adapter.pl" "$APP/Contents/Resources/"
+
 IDENTITY="${SIGN_ID:-$(security find-identity -v -p codesigning 2>/dev/null | awk '/Apple Development/ {print $2; exit}')}"
+codesign --force --sign "${IDENTITY:--}" "$FW"
 codesign --force --sign "${IDENTITY:--}" "$APP"
 echo "Built $APP (signed with ${IDENTITY:-ad-hoc})"
 

@@ -304,6 +304,7 @@ struct CollapsedView: View {
     }
 
     private static let focusTint = Color(red: 0.62, green: 0.6, blue: 1.0)
+    private static let connectionTint = Color(red: 0.35, green: 0.68, blue: 1.0)
 
     private static func tint(for state: LiveActivity.State) -> Color {
         switch state {
@@ -361,6 +362,16 @@ struct CollapsedView: View {
                 BatteryGlyph(percent: percent, charging: charging, size: 13.5)
                 label(charging ? "Charging" : "On Battery")
                 label("\(percent)%", tint: .white.opacity(0.55))
+                if charging, let minutes = model.battery.minutesToFull {
+                    label("Full in \(DurationText.short(minutes: minutes))", tint: .green.opacity(0.85))
+                        .transition(.opacity)
+                }
+            }
+        case .connection(let name, let symbol, let on):
+            HStack(spacing: 6) {
+                glyph(symbol, tint: on ? Self.connectionTint : .white.opacity(0.45))
+                label(on ? name : "\(name) Off", tint: on ? .white.opacity(0.88) : .white.opacity(0.55))
+                if on { label("Connected", tint: Self.connectionTint) }
             }
         case .accessory(let acc):
             HStack(spacing: 6) {
@@ -450,9 +461,13 @@ struct OpenWings: View {
     /// swipe itself, so the icons fade with the finger rather than snapping when the page settles.
     private var awayFromMedia: CGFloat {
         let pages = ui.pages
-        guard let media = pages.firstIndex(of: .player), let here = pages.firstIndex(of: ui.tab) else { return 1 }
-        let offset = CGFloat(media - here) * NotchUI.pagerWidth + ui.dragOffset
-        return min(1, abs(offset) / (NotchUI.pagerWidth * 0.6))
+        guard let here = pages.firstIndex(of: ui.tab) else { return 1 }
+        // The Call page already shows the call, so its icons hide there too.
+        let quiet: [NotchTab] = model.activities.current?.id == LiveWatcher.callID ? [.player, .call] : [.player]
+        let nearest = quiet.compactMap { pages.firstIndex(of: $0) }.map { page in
+            abs(CGFloat(page - here) * NotchUI.pagerWidth + ui.dragOffset)
+        }.min() ?? .infinity
+        return min(1, nearest / (NotchUI.pagerWidth * 0.6))
     }
 
     var body: some View {
@@ -541,6 +556,9 @@ struct ExpandedView: View {
         case .activity:
             ActivitiesPage()
                 .padding(.top, ui.notchSize.height + 6)
+        case .call:
+            CallPage()
+                .padding(.top, ui.notchSize.height + 4)
         case .rings:
             RingsPage()
                 .padding(.top, ui.notchSize.height - 2)

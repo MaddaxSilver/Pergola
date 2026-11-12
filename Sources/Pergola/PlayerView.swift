@@ -61,7 +61,8 @@ struct PlayerView: View {
     }
 
     @ViewBuilder private var sideButton: some View {
-        if leftButton == "none" {
+        // Browsers have no shuffle, repeat or favourite to control.
+        if leftButton == "none" || !player.hasModes {
             Color.clear.frame(width: 34, height: 30)
         } else if leftButton == "favorite" {
             ControlButton(symbol: player.favorited ? "heart.fill" : "heart", size: 15,

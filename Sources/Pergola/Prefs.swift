@@ -69,6 +69,8 @@ enum Prefs {
     static let callTimer = "callTimer"
     static let clockTimers = "clockTimers"
     static let activityOverlay = "activityOverlay"
+    static let connectionOverlay = "connectionOverlay"
+    static let webMedia = "webMedia"
 
     static func registerDefaults() {
         UserDefaults.standard.register(defaults: [
@@ -78,6 +80,8 @@ enum Prefs {
             clockTimers: true,
             shortcutsEnabled: true,
             activityOverlay: true,
+            connectionOverlay: true,
+            webMedia: true,
             expandOnHover: true,
             hoverDelay: 0.08,
             hideInFullscreen: true,

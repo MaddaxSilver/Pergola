@@ -479,6 +479,8 @@ private struct MediaPage: View {
     @AppStorage(Prefs.colorMatch) private var colorMatch = true
     @AppStorage(Prefs.collapseOnPause) private var collapseOnPause = false
     @AppStorage(Prefs.trackOverlay) private var trackOverlay = true
+    @AppStorage(Prefs.webMedia) private var webMedia = true
+    @Environment(AppModel.self) private var model
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -495,6 +497,12 @@ private struct MediaPage: View {
                 }
             }
             Footnote(text: "Auto shows whatever app is playing music. Pick Spotify or Music to only ever show that app.")
+
+            Card {
+                ToggleRow(title: "Browsers and Other Apps", isOn: $webMedia)
+                    .onChange(of: webMedia) { _, on in model.player.web.setEnabled(on) }
+            }
+            Footnote(text: "With Auto, also shows YouTube, SoundCloud and other players in Safari, Chrome, Arc and other browsers, plus apps like Podcasts. They get play, pause, skip and the progress bar; shuffle, repeat and favorite stay with Music and Spotify.")
 
             Card {
                 VStack(alignment: .leading, spacing: 14) {
@@ -582,6 +590,7 @@ private struct BatteryPage: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Card { ToggleRow(title: "Charger Connect", isOn: $chargingOverlay) }
+            Footnote(text: "Shows the battery level when you plug in, and how long until it's full once macOS has an estimate.")
             DurationCard(seconds: $seconds, range: 2...8)
         }
     }
@@ -640,6 +649,7 @@ private struct WeatherPage: View {
 private struct AccessoriesPage: View {
     @AppStorage(Prefs.accessoryOverlay) private var accessoryOverlay = true
     @AppStorage(Prefs.outputOverlay) private var outputOverlay = true
+    @AppStorage(Prefs.connectionOverlay) private var connectionOverlay = true
     @AppStorage(Prefs.overlaySeconds) private var seconds = 3.0
 
     var body: some View {
@@ -647,8 +657,9 @@ private struct AccessoriesPage: View {
             Card {
                 ToggleRow(title: "Accessory Connect", isOn: $accessoryOverlay)
                 ToggleRow(title: "Output Change", isOn: $outputOverlay, divider: true)
+                ToggleRow(title: "Connections", isOn: $connectionOverlay, divider: true)
             }
-            Footnote(text: "Accessory Connect shows AirPods and other Bluetooth devices with their battery when they connect. Output Change shows where your audio is playing when it switches.")
+            Footnote(text: "Accessory Connect shows AirPods and other Bluetooth devices with their battery when they connect. Output Change shows where your audio is playing when it switches. Connections shows a VPN, your iPhone's Personal Hotspot or a display (by cable or AirPlay) connecting and disconnecting.")
             DurationCard(seconds: $seconds, range: 2...8)
         }
     }

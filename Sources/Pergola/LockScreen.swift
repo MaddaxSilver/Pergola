@@ -447,6 +447,7 @@ struct LockBigArtView: View {
                 ProgressBar(player: player, tint: tint)
                 HStack(spacing: 0) {
                     ShuffleButton(player: player, size: 22, tint: .white)
+                        .opacity(player.hasModes ? 1 : 0).allowsHitTesting(player.hasModes)
                     Spacer()
                     ControlButton(symbol: "backward.fill", size: 28) { player.previous() }
                     Spacer()
@@ -455,6 +456,7 @@ struct LockBigArtView: View {
                     ControlButton(symbol: "forward.fill", size: 28) { player.next() }
                     Spacer()
                     RepeatButton(player: player, size: 22, tint: .white)
+                        .opacity(player.hasModes ? 1 : 0).allowsHitTesting(player.hasModes)
                 }
                 .padding(.horizontal, 6)
                 LockVolumeSlider()

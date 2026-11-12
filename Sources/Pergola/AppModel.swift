@@ -10,6 +10,8 @@ enum Peek: Equatable {
     case focus(name: String, symbol: String, on: Bool)
     /// Another app's task started, finished or needs you.
     case activity(title: String, status: String, state: LiveActivity.State)
+    /// A VPN, Personal Hotspot or display connected or disconnected.
+    case connection(name: String, symbol: String, on: Bool)
     /// A coin toss; `toss` tells one flip from the next so a repeat spins again.
     case coin(heads: Bool, toss: Int)
 
@@ -28,10 +30,10 @@ enum Peek: Equatable {
 
 /// Pages left to right: Calendar ← Files ← Media → Weather. Swipe left from Media for Weather, right for Files.
 enum NotchTab: String, CaseIterable {
-    case calendar, tray, player, weather, activity, rings
+    case calendar, tray, call, player, weather, activity, rings
 
     var symbol: String {
-        switch self { case .activity: "bolt.fill"; case .rings: "target"; case .player: "music.note"; case .weather: "cloud.sun.fill"; case .tray: "tray.fill"; case .calendar: "calendar" }
+        switch self { case .call: "phone.fill"; case .activity: "bolt.fill"; case .rings: "target"; case .player: "music.note"; case .weather: "cloud.sun.fill"; case .tray: "tray.fill"; case .calendar: "calendar" }
     }
 }
 
@@ -49,6 +51,8 @@ final class NotchUI {
     var previewingGlass = false
     /// Another app has a live activity up, so the Activity page exists.
     var hasActivities = false
+    /// A call is going on, so the Call page exists.
+    var hasCall = false
     /// An app is sharing goal rings, so the Rings page exists.
     var hasRings = false
     /// The enlarged album-art view (opened by clicking the artwork).
@@ -93,6 +97,7 @@ final class NotchUI {
                 && ($0 != .calendar || Prefs.d.bool(forKey: Prefs.calendarEnabled))
                 // Tasks from other apps share the Files page; they only get a page of their own without it.
                 && ($0 != .activity || (hasActivities && !Prefs.d.bool(forKey: Prefs.trayEnabled)))
+                && ($0 != .call || hasCall)
                 && ($0 != .rings || (hasRings && Prefs.d.bool(forKey: Prefs.ringsPage)))
         }
     }
@@ -114,6 +119,8 @@ final class AppModel {
     let player = NowPlaying()
     let weather = Weather()
     let battery = Battery()
+    let connections = Connections()
+    let mic = MicMute()
     let waveform = Waveform()
     let tray = FileTray()
     let accessories = Accessories()
@@ -140,6 +147,11 @@ final class AppModel {
             guard let self, Prefs.d.bool(forKey: Prefs.chargingOverlay), self.allowedDuringFocus(Prefs.focusShowsBattery) else { return }
             self.showPeek(.charging(percent: self.battery.percent, charging: self.battery.charging))
         }
+        connections.onChange = { [weak self] name, symbol, on in
+            guard let self, Prefs.d.bool(forKey: Prefs.connectionOverlay), self.allowedDuringFocus(Prefs.focusShowsAccessories) else { return }
+            self.showPeek(.connection(name: name, symbol: symbol, on: on))
+        }
+        connections.start()
         accessories.onConnect = { [weak self] acc in
             guard let self, Prefs.d.bool(forKey: Prefs.accessoryOverlay), self.allowedDuringFocus(Prefs.focusShowsAccessories) else { return }
             self.showPeek(.accessory(acc))
@@ -201,6 +213,8 @@ final class AppModel {
                 case "output": .output(name: "AirPods Pro", symbol: "airpodspro")
                 case "airpods": .accessory(Accessory(id: "x", name: "Alex’s AirPods Pro", symbol: "airpodspro", left: 82, right: 79, caseLevel: 55))
                 case "charging": .charging(percent: 66, charging: true)
+                case "vpn": .connection(name: "VPN", symbol: "lock.shield.fill", on: true)
+                case "hotspot": .connection(name: "Personal Hotspot", symbol: "personalhotspot", on: true)
                 default: .sensory(.volume, level: 0.44, muted: false)
                 }
                 self?.showPeek(peek, seconds: 60)
@@ -220,6 +234,7 @@ final class AppModel {
                 self?.player.checkForRestart()
                 self?.activities.prune()
                 self?.live.tick()
+                self?.reconcileCall()
             }
         }
     }
@@ -257,6 +272,19 @@ final class AppModel {
     private func reconcileLyrics() {
         guard player.hasTrack else { return }
         lyrics.load(title: player.title, artist: player.artist, album: player.album, duration: player.duration)
+    }
+
+    /// A call starting brings its page to the front (so opening the notch shows the call, like the
+    /// Dynamic Island); a call ending takes the page away and never leaves the microphone muted.
+    private func reconcileCall() {
+        let onCall = activities.items.contains { $0.id == LiveWatcher.callID }
+        guard onCall != ui.hasCall else { return }
+        withAnimation(Motion.content) {
+            ui.hasCall = onCall
+            if onCall, !ui.expanded { ui.tab = .call }
+            if !onCall, ui.tab == .call { ui.tab = .player }
+        }
+        if onCall { mic.refresh() } else { mic.unmuteIfNeeded() }
     }
 
     /// Tosses a coin under the closed notch: it spins, lands, and says which side came up.

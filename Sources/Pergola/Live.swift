@@ -284,6 +284,13 @@ enum DurationText {
         return number.isEmpty && total > 0 ? total : nil
     }
 
+    /// 40 → "40m", 80 → "1h 20m", 120 → "2h".
+    static func short(minutes: Int) -> String {
+        let (h, m) = (minutes / 60, minutes % 60)
+        if h == 0 { return "\(m)m" }
+        return m == 0 ? "\(h)h" : "\(h)h \(m)m"
+    }
+
     /// 300 → "5 min", 5400 → "1 hr 30 min".
     static func spoken(_ s: Double) -> String {
         let n = Int(s.rounded())
