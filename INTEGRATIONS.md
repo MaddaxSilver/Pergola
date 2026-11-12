@@ -74,6 +74,9 @@ turns orange when it needs you, and ticks when it finishes.
 **Timers and calls.** `Pergola --timer 5m Tea` starts a countdown (`90s`, `1h30m` and `2:30` work too);
 MCP clients have a `start_timer` tool. Pergola also shows timers running in the Clock app, and how
 long you have been on a FaceTime, Zoom, Teams, Webex, Discord, Slack, WhatsApp or Signal call.
+Calls in the browser (Google Meet, and the web versions of Zoom, Teams and others) count too: while
+Chrome, Safari, Arc, Edge, Brave or Vivaldi uses the microphone, Pergola asks it whether a tab is on a
+call site, so macOS asks once to let Pergola control that browser.
 
 **Other AI tools (ChatGPT, Codex, Gemini, Cursor, Copilot…).** Each gets its own mark in the notch:
 its real app icon when that app is installed, otherwise a symbol in its colour. Pergola works out
