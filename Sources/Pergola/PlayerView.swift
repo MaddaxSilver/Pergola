@@ -13,12 +13,11 @@ struct PlayerView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 12) {
-                Button { withAnimation(Motion.expand) { model.ui.bigArt = true } } label: {
-                    ArtworkView(image: player.artwork, cornerRadius: 11)
-                        .frame(width: 54, height: 54)
-                }
-                .buttonStyle(PressStyle())
-                .help("Show big album art and lyrics")
+                ArtworkView(image: player.artwork, cornerRadius: 11)
+                    .frame(width: 54, height: 54)
+                    .liftable(radius: 11)
+                    .onTapGesture { withAnimation(Motion.expand) { model.ui.bigArt = true } }
+                    .help(player.source == .web ? "Click to play the video here, or drag it out" : "Click for big album art, or drag it out")
 
                 VStack(alignment: .leading, spacing: 1) {
                     MarqueeText(text: player.title, alignment: .leading)
@@ -265,28 +264,41 @@ struct BigArtView: View {
     private var ui: NotchUI { model.ui }
 
     var body: some View {
-        let showLyrics = ui.bigArtLyrics
+        let showLyrics = ui.bigArtLyrics && !ui.bigVideo
         HStack(alignment: .center, spacing: showLyrics ? 22 : 0) {
             sideControls
             if !showLyrics { Spacer(minLength: 0) }
             VStack(spacing: 10) {
-                ArtworkView(image: player.artwork, cornerRadius: 18)
-                    .frame(width: 200, height: 200)
-                    .background(ArtGlow(color: player.accent, radius: 18, blur: 26, y: 10, opacity: 0.5))
-                    .scaleEffect(player.isPlaying ? 1 : 0.92)
-                    .animation(.spring(duration: 0.5, bounce: 0.3), value: player.isPlaying)
-                    .onTapGesture { player.playPause() }
+                if ui.bigVideo {
+                    // A browser's video plays right here in the notch.
+                    VideoCard(cornerRadius: 16)
+                        .frame(width: 320, height: 180)
+                        .background(ArtGlow(color: player.accent, radius: 16, blur: 26, y: 10, opacity: 0.4))
+                        .liftable(radius: 16)
+                        .onTapGesture { player.playPause() }
+                        .onAppear { model.video.want("notch", bundleID: player.webBundleID) }
+                        .onDisappear { model.video.release("notch") }
+                } else {
+                    ArtworkView(image: player.artwork, cornerRadius: 18)
+                        .frame(width: 200, height: 200)
+                        .background(ArtGlow(color: player.accent, radius: 18, blur: 26, y: 10, opacity: 0.5))
+                        .scaleEffect(player.isPlaying ? 1 : 0.92)
+                        .animation(.spring(duration: 0.5, bounce: 0.3), value: player.isPlaying)
+                        .liftable(radius: 18)
+                        .onTapGesture { player.playPause() }
+                }
                 VStack(spacing: 1) {
                     MarqueeText(text: player.title, alignment: .center)
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(.white)
                         .frame(height: 18)
-                    Text(player.artist)
+                    Text(videoHint ?? player.artist)
                         .font(.system(size: 12))
-                        .foregroundStyle(.white.opacity(0.65))
+                        .foregroundStyle(videoHint == nil ? .white.opacity(0.65) : .orange.opacity(0.9))
                         .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                 }
-                .frame(width: 200)
+                .frame(width: ui.bigVideo ? 320 : 200)
             }
             if showLyrics {
                 lyrics
@@ -301,13 +313,32 @@ struct BigArtView: View {
         .animation(.spring(duration: 0.5, bounce: 0.15), value: showLyrics)
     }
 
+    /// Why the video can't be shown, when that's something you can fix.
+    private var videoHint: String? {
+        guard ui.bigVideo else { return nil }
+        let safari = player.webBundleID?.hasPrefix("com.apple.Safari") ?? true
+        switch model.video.status {
+        case .noJavaScript: return safari ? "Turn on Allow JavaScript from Apple Events in Safari's Developer settings"
+                                          : "Turn on View › Developer › Allow JavaScript from Apple Events"
+        case .noPermission: return "Allow Pergola in Screen Recording to show the video"
+        case .protected: return "This video is protected and can't be shown here"
+        default: return nil
+        }
+    }
+
     private var sideControls: some View {
         VStack(spacing: 6) {
             sideButton("arrow.down.right.and.arrow.up.left", active: false, help: "Back to the player") {
                 withAnimation(Motion.collapse) { model.ui.bigArt = false }
             }
-            sideButton("quote.bubble.fill", active: ui.bigArtLyrics, help: "Lyrics") {
-                model.ui.bigArtLyrics.toggle()
+            if ui.bigVideo {
+                sideButton("pip.enter", active: false, help: "Picture in Picture") {
+                    model.pip.popOut()
+                }
+            } else {
+                sideButton("quote.bubble.fill", active: ui.bigArtLyrics, help: "Lyrics") {
+                    model.ui.bigArtLyrics.toggle()
+                }
             }
         }
         .padding(4)
@@ -400,5 +431,46 @@ struct ArtGlow: View {
             .blur(radius: blur)
             .offset(y: y)
             .animation(.easeInOut(duration: 0.8), value: color)
+    }
+}
+
+// MARK: - Pulling the art out as picture in picture
+
+extension View {
+    /// Lets the art be dragged out of the notch into a floating picture-in-picture window.
+    func liftable(radius: CGFloat) -> some View { modifier(Liftable(radius: radius)) }
+}
+
+private struct Liftable: ViewModifier {
+    @Environment(AppModel.self) private var model
+    let radius: CGFloat
+    @State private var size = CGSize.zero
+    @State private var pulling = false
+
+    func body(content: Content) -> some View {
+        let lifted = model.ui.artLifted
+        content
+            .opacity(lifted ? 0 : 1)
+            .scaleEffect(lifted ? 0.7 : 1)
+            .background(RoundedRectangle(cornerRadius: radius, style: .continuous).fill(.white.opacity(lifted ? 0.07 : 0)))
+            .contentShape(Rectangle())
+            .onGeometryChange(for: CGSize.self) { $0.size } action: { size = $0 }
+            .gesture(DragGesture(minimumDistance: 4, coordinateSpace: .local)
+                .onChanged { v in
+                    let m = NSEvent.mouseLocation
+                    if !pulling {
+                        pulling = true
+                        // Where the art is on screen, worked out from where the pointer is inside it.
+                        let rect = CGRect(x: m.x - v.location.x, y: m.y + v.location.y - size.height,
+                                          width: size.width, height: size.height)
+                        let start = CGPoint(x: m.x - v.translation.width, y: m.y + v.translation.height)
+                        model.pip.beginPull(artRect: rect, radius: radius, mouse: start)
+                    }
+                    model.pip.pull(to: m)
+                }
+                .onEnded { _ in
+                    pulling = false
+                    model.pip.endPull()
+                })
     }
 }

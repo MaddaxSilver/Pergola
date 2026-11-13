@@ -60,6 +60,10 @@ final class NotchUI {
     var bigArtLyrics = Prefs.d.bool(forKey: Prefs.bigArtLyrics) {
         didSet { Prefs.d.set(bigArtLyrics, forKey: Prefs.bigArtLyrics) }
     }
+    /// The player's art has been grabbed and is being pulled out as picture in picture.
+    var artLifted = false
+    /// The enlarged view shows a browser's video rather than album art (no lyrics beside it).
+    var bigVideo = false
     /// The lock screen's enlarged album-art view.
     var lockBig = false
     /// Files are being dragged over the open notch.
@@ -104,7 +108,7 @@ final class NotchUI {
 
     /// Size of the expanded panel, not counting the flared top corners.
     var expandedSize: CGSize {
-        if bigArt { return CGSize(width: bigArtLyrics ? 620 : 420, height: notchSize.height + 270) }
+        if bigArt { return CGSize(width: bigArtLyrics && !bigVideo ? 620 : 420, height: notchSize.height + 270) }
         return CGSize(width: Self.pagerWidth, height: notchSize.height + 118 + extraTaskHeight)
     }
     /// The largest the open notch ever gets (sizes the window once, so it never has to resize).
@@ -130,6 +134,8 @@ final class AppModel {
     let focus = FocusWatcher()
     let output = OutputWatcher()
     let activities = Activities()
+    let video = VideoMirror()
+    @ObservationIgnored private(set) lazy var pip = PiPController(model: self)
     @ObservationIgnored private(set) lazy var api = PergolaAPI(activities: activities)
     @ObservationIgnored private lazy var live = LiveWatcher(activities: activities)
 
@@ -235,6 +241,7 @@ final class AppModel {
                 self?.activities.prune()
                 self?.live.tick()
                 self?.reconcileCall()
+                if let self { let v = self.player.source == .web; if self.ui.bigVideo != v { self.ui.bigVideo = v } }
             }
         }
     }

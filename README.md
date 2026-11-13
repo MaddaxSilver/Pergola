@@ -12,6 +12,9 @@ build it yourself.
 - **Media**: album art, title, scrubber and controls for Music and Spotify, a live waveform drawn
   from the player's own audio, synced lyrics, and a large album-art view. YouTube, SoundCloud and
   other players in your browser show up too, with play, pause, skip and the progress bar.
+- **Picture in picture**: drag the art down out of the notch and it stretches, then pinches off like
+  a drop of water into a floating window playing the browser's video (or the album art for music).
+  Drag it back up and it melts into the notch. Click the art to play the video inside the open notch.
 - **Calendar**: a week strip you can tap through, with each day's events and a Join button for
   Zoom, Meet, Teams, Webex and FaceTime links.
 - **Weather**: current conditions and the next hours, from your location or a city you type.
@@ -58,8 +61,8 @@ Each is asked for only when a feature needs it, and every feature can be switche
 | Permission | Used for |
 |---|---|
 | Automation (Music / Spotify) | Reading what's playing, play/pause/skip |
-| Automation (your browser) | Only while the browser uses the microphone: checking whether a tab is on a call site |
-| Screen & System Audio Recording | Live waveform (only the music app, only while playing) |
+| Automation (your browser) | Only while the browser uses the microphone: checking whether a tab is on a call site. For picture in picture: finding where the video sits on the page (also needs the browser's "Allow JavaScript from Apple Events") |
+| Screen & System Audio Recording | Live waveform (only the music app, only while playing); picture in picture (only the browser's video, only while shown) |
 | Accessibility | Taking over the volume and brightness keys |
 | Full Disk Access | Reading Focus mode names |
 | Bluetooth | AirPods battery |
