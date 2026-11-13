@@ -496,13 +496,13 @@ private struct MediaPage: View {
                 default: AppIcon(bundleID: "com.apple.Music")
                 }
             }
-            Footnote(text: "Auto shows whatever app is playing music. Pick Spotify or Music to only ever show that app.")
+            Footnote(text: "Auto shows whichever of Music and Spotify is playing. Pick one to only ever show that app.")
 
             Card {
                 ToggleRow(title: "Browsers and Other Apps", isOn: $webMedia)
                     .onChange(of: webMedia) { _, on in model.player.web.setEnabled(on) }
             }
-            Footnote(text: "With Auto, also shows YouTube, SoundCloud and other players in Safari, Chrome, Arc and other browsers, plus apps like Podcasts. They get play, pause, skip and the progress bar; shuffle, repeat and favorite stay with Music and Spotify.")
+            Footnote(text: "Also shows YouTube, SoundCloud and other players in Safari, Chrome, Arc and other browsers, plus apps like Podcasts. They get play, pause, skip and the progress bar; shuffle, repeat and favorite stay with Music and Spotify.")
 
             Card {
                 VStack(alignment: .leading, spacing: 14) {

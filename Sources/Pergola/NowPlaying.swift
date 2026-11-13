@@ -142,10 +142,12 @@ final class NowPlaying {
     }
 
     private func allowed(_ app: PlayerApp) -> Bool {
-        switch Prefs.d.string(forKey: Prefs.playerSource) {
+        // Browsers have their own switch: the Source choice is only between Music and Spotify.
+        if app == .web { return Prefs.d.bool(forKey: Prefs.webMedia) }
+        return switch Prefs.d.string(forKey: Prefs.playerSource) {
         case "music": app == .music
         case "spotify": app == .spotify
-        default: app != .web || Prefs.d.bool(forKey: Prefs.webMedia)
+        default: true
         }
     }
 
