@@ -292,15 +292,13 @@ struct TrayLiquidView: View {
 ///    surface pulls down after it in a meniscus and a neck that thins as you pull, until it pinches:
 ///    the surface springs back up with a wobble, the drop's tail snaps in, and the drop, wobbling,
 ///    follows the pointer. Let go over the notch and it sinks back in.
-///  • Bring files up toward the open notch: its surface bulges down to meet them, and joins them once
-///    they're close. Dropping them in makes the surface gulp.
 @MainActor
 final class LiquidTray {
     private unowned let model: AppModel
     let goo = Goo()
     private var timer: Timer?
 
-    private enum Phase { case idle, pulling, returning, popping, reaching, settling }
+    private enum Phase { case idle, pulling, returning, popping, settling }
     private var phase: Phase = .idle
 
     private var drop = Drop()
@@ -336,7 +334,7 @@ final class LiquidTray {
     // MARK: Test mode
 
     /// PERGOLA_LIQUID_DEMO=pull:<points> holds a file drag that far below its slot (add ",go" to let
-    /// go there); reach:<points> holds files that far below the open notch. For checking the look.
+    /// go there). For checking the look.
     private var demoMouse: CGPoint?
     private var demoDown = true
     private var pointer: CGPoint { demoMouse ?? NSEvent.mouseLocation }
@@ -344,7 +342,7 @@ final class LiquidTray {
 
     func startDemoIfAsked() {
         guard let spec = ProcessInfo.processInfo.environment["PERGOLA_LIQUID_DEMO"] else { return }
-        // pull:<dx>,<dy> / reach:<dx>,<dy>, in points from the open notch's bottom centre (dy down).
+        // pull:<dx>,<dy>, in points from the open notch's bottom centre (dy down).
         let parts = spec.split(separator: ":")
         let nums = (parts.last ?? "").split(separator: ",").compactMap { Double($0) }.map { CGFloat($0) }
         // Add ",go" to let go once there (like a real drop), which ends the test.
@@ -352,12 +350,7 @@ final class LiquidTray {
         let release = spec.contains(",go")
         let glide: Double = spec.contains("slow") ? 3.0 : 0.8
         let n = openNotch
-        if parts.first == "reach" {
-            demoMouse = CGPoint(x: n.midX + dx, y: n.minY - dy)
-            Timer.scheduledTimer(withTimeInterval: 1.0 / 60, repeats: true) { [weak self] _ in
-                MainActor.assumeIsolated { if let self, let m = self.demoMouse { self.reach(toward: m) } }
-            }
-        } else {
+        do {
             let slot = CGRect(x: n.midX - 20, y: n.minY + 30, width: 40, height: 40)
             demoMouse = CGPoint(x: slot.midX, y: slot.midY)
             beginDragOut(UUID(), icon: NSWorkspace.shared.icon(forFile: "/System/Applications/Notes.app"), slot: slot)
@@ -423,7 +416,7 @@ final class LiquidTray {
 
     /// A tray tile started being dragged. `slot` is its icon's rect on screen.
     func beginDragOut(_ item: UUID, icon: NSImage, slot: CGRect) {
-        guard phase == .idle || phase == .reaching || phase == .settling else { return }
+        guard phase == .idle || phase == .settling else { return }
         phase = .pulling
         broken = false
         popped = false
@@ -541,64 +534,6 @@ final class LiquidTray {
         withAnimation(.spring(duration: 0.35, bounce: 0.3)) { model.ui.liftedTrayItem = nil }
     }
 
-    // MARK: Files coming in
-
-    /// Files are being dragged near the open notch (from below): its surface reaches for them.
-    func reach(toward mouse: CGPoint) {
-        guard phase == .idle || phase == .reaching || phase == .settling else { return }
-        let r: CGFloat = 26
-        let o = outline(mouse)
-        let gap = o.distance - r
-        guard model.ui.expanded, gap > -r, gap < 260, mouse.y < openNotch.maxY - 4 else { endReach(); return }
-        if phase != .reaching {
-            phase = .reaching
-            icon = nil
-            hasDrop = false
-            drop.snap(CGRect(x: mouse.x - r, y: mouse.y - r, width: 2 * r, height: 2 * r))
-            drop.move(response: 0.12, damping: 0.8)
-            drop.resize(response: 0.25, damping: 0.6)
-            alpha.snap(1)
-            bump.tune(response: 0.22, damping: 0.75)
-            startTimer()
-        }
-        drop.aim(center: mouse)
-        let u = max(0, min(1, 1 - gap / 260))
-        // The surface bulges down toward the files; nearer, a drop forms around them, and close
-        // enough the two join.
-        bump.target = min(max(gap, 0) * 0.62, 70) * pow(u, 1.2)
-        connected = gap < 56
-        hasDrop = gap < 110
-        let near = max(0, min(1, (110 - gap) / 60))
-        drop.aim(size: CGSize(width: 2 * r * (0.55 + 0.45 * near), height: 2 * r * (0.55 + 0.45 * near)))
-        neck.target = 2 * r * (0.35 + 0.35 * max(0, min(1, (56 - gap) / 56)))
-        foot = 34 + 22 * u
-        setAnchor(o)
-    }
-
-    func endReach() {
-        guard phase == .reaching else { return }
-        phase = .settling
-        hasDrop = false
-        connected = false
-        bump.tune(response: 0.34, damping: 0.35)
-        bump.target = 0
-    }
-
-    /// Files were dropped into the tray: the surface gulps.
-    func gulp() {
-        guard model.ui.expanded else { return }
-        phase = .settling
-        hasDrop = false
-        connected = false
-        foot = 46
-        let o = outline(NSEvent.mouseLocation)
-        setAnchor(o)
-        bump.tune(response: 0.34, damping: 0.3)
-        bump.target = 0
-        bump.v = 260
-        startTimer()
-    }
-
     // MARK: Frame loop
 
     private func startTimer() {
@@ -629,7 +564,7 @@ final class LiquidTray {
         case .popping: done = Date().timeIntervalSince(popStart) > 0.5 && abs(bump.x) < 0.3
         case .settling: done = abs(bump.x) < 0.3 && abs(bump.v) < 4
         case .idle: done = true
-        case .pulling, .reaching: break
+        case .pulling: break
         }
         if done || (!model.ui.expanded && phase != .pulling && phase != .popping) {
             phase = .idle
@@ -667,7 +602,7 @@ final class LiquidTray {
         f.rx = drop.w.x / 2 * drop.sx.x
         f.ry = drop.h.x / 2 * drop.sy.x
         let outside = outline(drop.center).distance > -f.ry
-        f.hasDrop = hasDrop && (phase == .reaching || outside)
+        f.hasDrop = hasDrop && outside
         if popped {
             let b = CGFloat(min(1, Date().timeIntervalSince(popStart) / 0.42))
             f.burst = b < 1 ? b * (2 - b) : nil // ease out

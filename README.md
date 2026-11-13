@@ -15,9 +15,8 @@ build it yourself.
 - **Calendar**: a week strip you can tap through, with each day's events and a Join button for
   Zoom, Meet, Teams, Webex and FaceTime links.
 - **Weather**: current conditions and the next hours, from your location or a city you type.
-- **Files tray**: drag files onto the notch to park them, drag them back out later. Files leave the
-  open notch as drops of Liquid Glass that stretch and pinch off its edge, and the edge reaches out
-  for files you bring to it.
+- **Files tray**: drag files onto the notch to park them, drag them back out later. A file dragged out
+  of the open notch clings to it as Liquid Glass, stretches, lets go and pops.
 - **Live activities**: any app, script or AI agent on your Mac can show a task and its progress.
   Claude Code, ChatGPT / Codex, Gemini, Cursor and others each get their own mark. Click a task to
   jump to its app. See [INTEGRATIONS.md](INTEGRATIONS.md).
