@@ -15,7 +15,9 @@ async function send(body, path = "video") {
       });
       if (!r.ok) continue;
       port = p;
-      return await r.json();
+      const j = await r.json();
+      j.port = p;
+      return j;
     } catch (e) { last = String(e); /* Pergola isn't running on this port */ }
   }
   return { error: last };

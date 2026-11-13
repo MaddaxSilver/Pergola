@@ -64,8 +64,8 @@ Each is asked for only when a feature needs it, and every feature can be switche
 |---|---|
 | Automation (Music / Spotify) | Reading what's playing, play/pause/skip |
 | Automation (your browser) | Only while the browser uses the microphone: checking whether a tab is on a call site. In Chrome and similar, for picture in picture: finding where the video sits on the page (also needs "Allow JavaScript from Apple Events") |
-| Safari extension (Pergola Picture in Picture) | Telling Pergola where the playing video is on the page, for picture in picture. Sends nothing but the video's position, and only to Pergola on this Mac |
-| Screen & System Audio Recording | Live waveform (only the music app, only while playing); picture in picture (only the browser's video, only while shown) |
+| Safari extension (Pergola Picture in Picture) | Picture in picture: hands Pergola the playing video's frames (only while it's shown, and only to Pergola on this Mac). Nothing else about the page is sent |
+| Screen & System Audio Recording | Live waveform (only the music app, only while playing); picture in picture in browsers other than Safari (only the video, only while shown) |
 | Accessibility | Taking over the volume and brightness keys |
 | Full Disk Access | Reading Focus mode names |
 | Bluetooth | AirPods battery |

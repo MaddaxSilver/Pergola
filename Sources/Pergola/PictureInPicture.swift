@@ -190,14 +190,14 @@ struct GooView: View {
                         if f.showsBody {
                             Color.clear
                                 .frame(width: box.width, height: box.height)
-                                .glassEffect(.clear.tint(.white.opacity(0.05)),
+                                .glassEffect(.clear,
                                              in: LiquidShape(body: f.body.offsetBy(dx: -box.minX, dy: -box.minY), radius: f.radius,
                                                              anchor: anchor, neck: f.neck, attach: f.attach))
                         }
                         if let n = f.notch {
                             Color.clear
                                 .frame(width: box.width, height: box.height)
-                                .glassEffect(.clear.tint(.white.opacity(0.05)),
+                                .glassEffect(.clear,
                                              in: LiquidShape(body: n.offsetBy(dx: -box.minX, dy: -box.minY), radius: f.notchRadius,
                                                              anchor: anchor, neck: f.neck, attach: f.attach, flip: true))
                         }
@@ -824,7 +824,8 @@ final class PiPController {
 
         // The overlay draws the water only while it's attached to something (or the notch is still
         // wobbling from a gulp); otherwise the real window shows itself.
-        let gulping = phase == .idle && (abs(grab.x) > 0.01 || !grab.settled)
+        let notchStill = abs(grab.x) < 0.01 && abs(grab.v) < 0.1
+        let gulping = phase == .idle && !notchStill
         let liquid = phase == .pulling || phase == .landing || phase == .returning || phase == .merging
             || attach.x > 0.01 || gulping
         if phase == .dragging || phase == .settling { setWindowHidden(liquid) }
@@ -833,8 +834,9 @@ final class PiPController {
 
         if liquid { render(showsBody: !gulping) }
 
-        let idle = (phase == .idle || phase == .floating) && grab.settled && abs(grab.x) < 0.005
-        if idle { grab.snap(0); if overlay?.isVisible == true { hideOverlay() }; stopTimer() }
+        // Nothing left moving: the water goes away and the frame loop stops, always.
+        let idle = (phase == .idle || phase == .floating) && notchStill && attach.x < 0.01
+        if idle { grab.snap(0); attach.snap(0); if overlay?.isVisible == true { hideOverlay() }; stopTimer() }
     }
 
     /// Whether the notch's own drop is part of the water right now.
@@ -926,7 +928,7 @@ struct PiPView: View {
             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             .padding(4)
             // A rim of the same Liquid Glass the water is made of.
-            .glassEffect(.clear.tint(.white.opacity(0.04)), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .glassEffect(.clear, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
             .contentShape(Rectangle())
             .onHover { h in withAnimation(.easeOut(duration: 0.2)) { hover = h } }
             .onTapGesture(count: 2) { player.openPlayer() }

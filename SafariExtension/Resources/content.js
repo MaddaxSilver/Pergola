@@ -65,36 +65,33 @@
   const canvas = document.createElement("canvas");
   const sleep = ms => new Promise(r => setTimeout(r, ms));
 
+  // Paced by Pergola's replies, not by timers: Safari slows a hidden page's timers to about one a
+  // second, but answers to messages arrive right away. Pergola holds each reply until it's time for
+  // the next frame (30 a second).
   async function streamFrames() {
     if (streaming) return;
     streaming = true;
     const ctx = canvas.getContext("2d", { alpha: false });
     let lastTime = -1;
     while (streaming && current()) {
-      const started = performance.now();
       const v = pick();
-      if (!v || v.readyState < 2 || !v.videoWidth) { await sleep(250); continue; }
-      // Same picture as last time (paused): don't send it again, just check in now and then.
-      if (v.currentTime === lastTime && v.paused) {
-        const r = await browser.runtime.sendMessage({ still: true }).catch(() => ({}));
-        if (!r || !r.frames) break;
-        await sleep(250); continue;
+      let msg;
+      if (!v || v.readyState < 2 || !v.videoWidth || v.currentTime === lastTime) {
+        msg = { still: true }; // nothing new: just wait for Pergola's next tick
+      } else {
+        lastTime = v.currentTime;
+        const w = Math.min(960, v.videoWidth), h = Math.round(w * v.videoHeight / v.videoWidth);
+        if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+        try {
+          ctx.drawImage(v, 0, 0, w, h);
+          msg = { frame: canvas.toDataURL("image/jpeg", 0.8), w, h }; // throws for protected video
+        } catch (e) {
+          await browser.runtime.sendMessage({ frameError: String(e) }).catch(() => ({}));
+          break;
+        }
       }
-      lastTime = v.currentTime;
-      const w = Math.min(1600, v.videoWidth), h = Math.round(w * v.videoHeight / v.videoWidth);
-      if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
-      let url;
-      try {
-        ctx.drawImage(v, 0, 0, w, h);
-        url = canvas.toDataURL("image/jpeg", 0.85);
-      } catch (e) {
-        // Protected video can't be read; Pergola offers the browser's own picture in picture.
-        await browser.runtime.sendMessage({ frameError: String(e) }).catch(() => ({}));
-        break;
-      }
-      const r = await browser.runtime.sendMessage({ frame: url, w, h }).catch(() => ({}));
+      const r = await browser.runtime.sendMessage(msg).catch(() => ({}));
       if (!r || !r.frames) break;
-      await sleep(Math.max(0, 33 - (performance.now() - started)));
     }
     streaming = false;
   }

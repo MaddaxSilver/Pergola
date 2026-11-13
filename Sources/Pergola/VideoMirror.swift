@@ -65,11 +65,13 @@ final class VideoMirror {
         users.insert(who)
         if self.bundleID != bundleID { stop(); self.bundleID = bundleID }
         if status == .off { begin() }
+        syncWanted()
     }
 
     func release(_ who: String) {
         users.remove(who)
         if users.isEmpty { stop() }
+        syncWanted()
     }
 
     func attach(_ layer: CALayer) {
@@ -310,7 +312,7 @@ final class VideoMirror {
         return ["reports": reportCount, "last": lastReport.mapValues { "\($0)" }, "status": String(describing: status),
          "users": Array(users), "hasFrame": hasFrame, "streaming": stream != nil,
          "spot": spot.map { "\($0.window) \($0.video)" } ?? "none",
-         "permission": CGPreflightScreenCaptureAccess(), "frames": frameCount, "extension": extensionEnabled.map { "\($0)" } ?? "unknown"]
+         "permission": CGPreflightScreenCaptureAccess(), "frames": frameCount, "received": sink?.received ?? 0, "dropped": sink?.dropped ?? 0, "extension": extensionEnabled.map { "\($0)" } ?? "unknown"]
     }
 
     func report(_ j: [String: Any]) -> [String: Any] {
@@ -359,23 +361,22 @@ final class VideoMirror {
 
     private var wantsPageFrames: Bool { !users.isEmpty && (bundleID.map(Self.isSafari) ?? false) }
 
-    /// A frame straight from the page's <video>, sent by the extension as `tab|data:image/jpeg;base64,…`
-    /// (or a small JSON note when paused or unreadable). The reply tells it whether to keep going.
-    func pageFrame(_ body: Data) -> [String: Any] {
-        let wanted = wantsPageFrames
-        guard wanted else { return ["frames": false] }
-        if body.first == UInt8(ascii: "{") {
-            if let j = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any], j["frameError"] != nil {
-                status = .protected
-            }
-            return ["frames": true]
+    /// Where the API delivers page frames (decoded off the main thread).
+    var sink: FrameSink? {
+        didSet {
+            sink?.deliver = { [weak self] image in self?.showPageFrame(image) }
+            syncWanted()
         }
-        guard let comma = body.firstIndex(of: UInt8(ascii: ",")),
-              let data = Data(base64Encoded: body[body.index(after: comma)...]),
-              let src = CGImageSourceCreateWithData(data as CFData, nil),
-              let image = CGImageSourceCreateImageAtIndex(src, 0, nil) else { return ["frames": true] }
+    }
+
+    private func syncWanted() { sink?.wanted = wantsPageFrames }
+
+    private func showPageFrame(_ image: CGImage?) {
+        guard wantsPageFrames else { return }
+        guard let image else { status = .protected; return }
         frameCount += 1
-        aspect = max(0.5, min(3, CGFloat(image.width) / CGFloat(max(image.height, 1))))
+        let a = max(0.5, min(3, CGFloat(image.width) / CGFloat(max(image.height, 1))))
+        if abs(a - aspect) > 0.01 { aspect = a }
         if status != .live { status = .live }
         if !hasFrame { hasFrame = true }
         frames.image = image
@@ -383,7 +384,6 @@ final class VideoMirror {
         CATransaction.setDisableActions(true)
         for layer in sinks.allObjects { layer.contents = image }
         CATransaction.commit()
-        return ["frames": true]
     }
 
     // MARK: Native picture-in-picture (protected video)
