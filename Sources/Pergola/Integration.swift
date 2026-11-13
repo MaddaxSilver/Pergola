@@ -23,6 +23,8 @@ final class PergolaAPI {
     private(set) var port: Int?
     /// Reports from the Safari extension about the video on the page; the reply goes back to it.
     @ObservationIgnored var onVideoReport: (([String: Any]) -> [String: Any])?
+    @ObservationIgnored var onVideoDebug: (() -> [String: Any])?
+    @ObservationIgnored var onVideoFrame: ((Data) -> [String: Any])?
     @ObservationIgnored private let activities: Activities
     @ObservationIgnored private var listener: NWListener?
     @ObservationIgnored private let queue = DispatchQueue(label: "pergola.api")
@@ -85,7 +87,7 @@ final class PergolaAPI {
             guard let self else { c.cancel(); return }
             var buffer = buffer
             if let data { buffer.append(data) }
-            guard buffer.count <= 1_048_576 else { self.reply(c, 413, ["error": "Request too large"]); return }
+            guard buffer.count <= 4_194_304 else { self.reply(c, 413, ["error": "Request too large"]); return }
             if let request = HTTPRequest(buffer) {
                 DispatchQueue.main.async {
                     let (status, body, headers) = MainActor.assumeIsolated { self.route(request) }
@@ -114,9 +116,18 @@ final class PergolaAPI {
         // page that re-points its own domain at 127.0.0.1 still sends its own Host.
         // The one exception: Pergola's own Safari extension reporting where a video is (POST /video).
         if let origin = r.headers["origin"] {
-            guard origin.hasPrefix("safari-web-extension://"), r.method == "POST", r.path == "/video" else {
+            Log.media.info("api \(r.method, privacy: .public) \(r.path, privacy: .public) origin=\(origin, privacy: .public)")
+            guard origin.hasPrefix("safari-web-extension://"), r.method == "POST" || r.method == "OPTIONS",
+                  r.path == "/video" || r.path == "/video/frame" else {
                 return (403, ["error": "Browser requests are not allowed"], [:])
             }
+            // Answered with CORS headers, so the extension needs no extra site permission to reach us.
+            let cors = ["Access-Control-Allow-Origin": origin, "Access-Control-Allow-Methods": "POST",
+                        "Access-Control-Allow-Headers": "Content-Type"]
+            if r.method == "OPTIONS" { return (200, nil, cors) }
+            if r.path == "/video/frame" { return (200, onVideoFrame?(r.body) ?? [:], cors) }
+            let json = (try? JSONSerialization.jsonObject(with: r.body)) as? [String: Any] ?? [:]
+            return (200, onVideoReport?(json) ?? [:], cors)
         }
         let host = (r.headers["host"] ?? "").split(separator: ":").first.map(String.init) ?? ""
         guard ["127.0.0.1", "localhost"].contains(host) else { return (403, ["error": "Bad Host"], [:]) }
@@ -148,6 +159,8 @@ final class PergolaAPI {
         case ("POST", "activity", 1):
             guard let a = activities.upsert(body ?? [:]) else { return (400, ["error": "\"id\" is required"]) }
             return (200, a.json)
+        case ("GET", "video", 1):
+            return (200, onVideoDebug?() ?? [:])
         case ("POST", "video", 1):
             return (200, onVideoReport?(body ?? [:]) ?? [:])
         case ("DELETE", "activity", 2):

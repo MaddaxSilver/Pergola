@@ -207,6 +207,8 @@ final class AppModel {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in self?.activities.restore() }
         ui.trayIsEmpty = { [weak self] in self?.tray.items.isEmpty ?? true }
         api.onVideoReport = { [weak self] report in self?.video.report(report) ?? [:] }
+        api.onVideoDebug = { [weak self] in self?.video.debugInfo ?? [:] }
+        api.onVideoFrame = { [weak self] body in self?.video.pageFrame(body) ?? [:] }
         api.setEnabled(Prefs.d.bool(forKey: Prefs.activitiesEnabled))
         sensory.start()
         focus.start()

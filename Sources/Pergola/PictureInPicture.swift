@@ -141,6 +141,8 @@ struct GooFrame {
     var neck: CGFloat = 0
     var attach: CGFloat = 0
     var contentAlpha: Double = 1
+    /// The body's size before squash and stretch.
+    var rest: CGSize = .zero
 
     var bounds: CGRect {
         var r = body
@@ -174,17 +176,70 @@ struct GooView: View {
                                                  neck: f.neck, attach: f.attach))
                     .offset(x: box.minX, y: box.minY)
                 let c = f.body.insetBy(dx: rim, dy: rim)
+                let rest = CGSize(width: max(2, f.rest.width - 2 * rim), height: max(2, f.rest.height - 2 * rim))
                 if c.width > 2, c.height > 2 {
-                    VideoCard(cornerRadius: max(3, f.radius - rim), cheap: true)
-                        .frame(width: c.width, height: c.height)
-                        .opacity(f.contentAlpha)
-                        .offset(x: c.minX, y: c.minY)
+                    let local = c.offsetBy(dx: -box.minX, dy: -box.minY)
+                    let anchor = CGPoint(x: f.anchor.x - box.minX, y: f.anchor.y - box.minY)
+                    ZStack(alignment: .topLeading) {
+                        // Laid out at its resting size, then squashed and stretched with the water.
+                        WaterPicture()
+                            .frame(width: rest.width, height: rest.height)
+                            .scaleEffect(x: c.width / rest.width, y: c.height / rest.height)
+                            .frame(width: c.width, height: c.height)
+                            .offset(x: local.minX, y: local.minY)
+                    }
+                    .frame(width: box.width, height: box.height, alignment: .topLeading)
+                    // …and poured up into the neck along with it.
+                    .distortionEffect(Liquid.warp(body: local, anchor: anchor, neck: f.neck * 0.8, attach: f.attach),
+                                      maxSampleOffset: CGSize(width: box.width, height: box.height),
+                                      isEnabled: Liquid.available && f.attach > 0.002 && WaterPicture.warpable(model))
+                    .mask(LiquidShape(body: local, radius: max(3, f.radius - rim), anchor: anchor,
+                                      neck: max(2, f.neck * 0.8), attach: f.attach))
+                    .opacity(f.contentAlpha)
+                    .offset(x: box.minX, y: box.minY)
                 }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .allowsHitTesting(false)
         .environment(\.colorScheme, .dark)
+    }
+}
+
+/// The warp shader (Shaders/Liquid.metal, built into Liquid.metallib).
+enum Liquid {
+    private static let library: ShaderLibrary? =
+        Bundle.main.url(forResource: "Liquid", withExtension: "metallib").map { ShaderLibrary(url: $0) }
+    static var available: Bool { library != nil }
+
+    static func warp(body: CGRect, anchor: CGPoint, neck: CGFloat, attach: CGFloat) -> Shader {
+        let lib = library ?? .default
+        return lib.liquidWarp(.float4(body.minX, body.minY, body.width, body.height),
+                              .float2(anchor.x, anchor.y), .float(neck), .float(attach))
+    }
+}
+
+/// The picture inside the water, drawn as an image so it can be bent: the page's own video frames
+/// (Safari), else the album art. Screen-captured video (other browsers) is shown as is.
+struct WaterPicture: View {
+    @Environment(AppModel.self) private var model
+
+    static func warpable(_ model: AppModel) -> Bool {
+        !(model.player.source == .web && model.video.hasFrame && model.video.frames.image == nil)
+    }
+
+    var body: some View {
+        ZStack {
+            Color.black
+            if model.player.source == .web, let frame = model.video.frames.image {
+                Image(decorative: frame, scale: 1).resizable().interpolation(.medium).aspectRatio(contentMode: .fill)
+            } else if model.player.source == .web, model.video.hasFrame {
+                VideoSurface(mirror: model.video)
+            } else if let art = model.player.artwork {
+                Image(nsImage: art).resizable().interpolation(.medium).aspectRatio(contentMode: .fill)
+            }
+        }
+        .clipped()
     }
 }
 
@@ -542,20 +597,26 @@ final class PiPController {
 
     // MARK: Dragging it around and back
 
+    /// The drag starts from the window's gesture, but is then followed by the frame loop (pointer and
+    /// button state read directly), so it carries on even while the window steps aside for the water.
     func windowDragChanged() {
-        guard let w = window else { return }
+        guard let w = window, phase != .dragging else { return }
+        guard phase == .floating || phase == .settling else { return }
         let mouse = NSEvent.mouseLocation
-        if phase != .dragging {
-            guard phase == .floating || phase == .settling else { return }
-            phase = .dragging
-            grabOffset = CGPoint(x: mouse.x - w.frame.minX, y: mouse.y - w.frame.minY)
-            w.level = Self.level
-            dragSamples = []
-            anchor = notchMouth
-            attach.tune(response: 0.2, damping: 0.72)
-            neck.tune(response: 0.2, damping: 0.85)
-            grab.tune(response: 0.22, damping: 0.75)
-        }
+        phase = .dragging
+        grabOffset = CGPoint(x: mouse.x - w.frame.minX, y: mouse.y - w.frame.minY)
+        w.level = Self.level
+        dragSamples = []
+        anchor = notchMouth
+        attach.tune(response: 0.2, damping: 0.72)
+        neck.tune(response: 0.2, damping: 0.85)
+        grab.tune(response: 0.22, damping: 0.75)
+        startTimer()
+        dragStep(mouse)
+    }
+
+    private func dragStep(_ mouse: CGPoint) {
+        guard let w = window else { return }
         dragSamples.append((CACurrentMediaTime(), mouse))
         dragSamples = dragSamples.filter { CACurrentMediaTime() - $0.t < 0.1 }
         var origin = CGPoint(x: mouse.x - grabOffset.x, y: mouse.y - grabOffset.y)
@@ -565,7 +626,7 @@ final class PiPController {
         let mouth = notchMouth
         origin.x += (mouth.x - (origin.x + size.width / 2)) * 0.18 * u * u
         origin.y += (notchRect.minY - (origin.y + size.height)) * 0.18 * u * u
-        w.setFrameOrigin(origin)
+        if w.frame.origin != origin { w.setFrameOrigin(origin) }
         body.snap(CGRect(origin: origin, size: size))
         radius.snap(18)
         // The whole top edge starts reaching up into the notch, more the closer it gets.
@@ -573,7 +634,6 @@ final class PiPController {
         attach.target = a
         neck.target = notchRect.width * (0.25 + 0.35 * a)
         grab.target = u * 0.7
-        startTimer()
     }
 
     func windowDragEnded() {
@@ -670,6 +730,9 @@ final class PiPController {
         lastTick = now
 
         if phase == .pulling { pullStep(NSEvent.mouseLocation) }
+        if phase == .dragging {
+            if NSEvent.pressedMouseButtons & 1 == 0 { windowDragEnded() } else { dragStep(NSEvent.mouseLocation) }
+        }
         if phase == .landing { stretchWithSpeed() }
         if let r = popRelease, Date() >= r {
             popRelease = nil
@@ -763,6 +826,7 @@ final class PiPController {
         f.neck = max(0, neck.x)
         f.attach = max(0, min(1, attach.x))
         f.contentAlpha = Double(max(0, min(1, contentAlpha.x)))
+        f.rest = CGSize(width: max(1, body.w.x), height: max(1, body.h.x))
         goo.frame = f
     }
 

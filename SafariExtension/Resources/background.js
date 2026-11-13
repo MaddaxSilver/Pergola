@@ -3,23 +3,28 @@
 const ports = [47600, 47601, 47602];
 let port = ports[0];
 
-async function send(body) {
+async function send(body, path = "video") {
+  let last = "";
   for (const p of [port, ...ports.filter(x => x !== port)]) {
     try {
-      const r = await fetch(`http://127.0.0.1:${p}/video`, {
+      const r = await fetch(`http://127.0.0.1:${p}/${path}`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        // Plain text keeps it a "simple" request (no preflight).
+        headers: { "Content-Type": "text/plain" },
+        body: typeof body === "string" ? body : JSON.stringify(body),
       });
       if (!r.ok) continue;
       port = p;
       return await r.json();
-    } catch (e) { /* Pergola isn't running on this port */ }
+    } catch (e) { last = String(e); /* Pergola isn't running on this port */ }
   }
-  return {};
+  return { error: last };
 }
 
 browser.runtime.onMessage.addListener((msg, sender) => {
   const tab = sender.tab || {};
+  // Frames go as the bare JPEG data URL, prefixed with which tab they're from.
+  if (msg.frame) return send(`${tab.id}|${msg.frame}`, "video/frame");
+  if (msg.still || msg.frameError) return send({ ...msg, tab: tab.id }, "video/frame");
   return send({ ...msg, tab: tab.id, active: !!tab.active, window: tab.windowId });
 });

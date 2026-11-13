@@ -15,6 +15,11 @@ cp Resources/Info.plist "$APP/Contents/Info.plist"
 # Render the app icon from code (Sources/Pergola/Icons.swift).
 "$BIN" --write-icon "$APP/Contents/Resources/AppIcon.icns"
 
+# The water's warp shader (Shaders/Liquid.metal).
+xcrun metal -c Shaders/Liquid.metal -o build/Liquid.air
+xcrun metallib build/Liquid.air -o "$APP/Contents/Resources/Liquid.metallib"
+rm -f build/Liquid.air
+
 # Browser music: MediaRemote Adapter (BSD-3-Clause, ThirdParty/mediaremote-adapter) reads what any app,
 # browsers included, reports as now playing. macOS only lets Apple's own programs ask, so Pergola runs it
 # inside /usr/bin/perl. Built here as a small framework next to the script that loads it.

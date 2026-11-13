@@ -4,6 +4,7 @@ import SwiftUI
 import CoreMedia
 import QuartzCore
 import SafariServices
+import CoreImage
 
 /// Mirrors the video that's playing in a browser tab, live, by copying just the video's rectangle
 /// out of the browser window with ScreenCaptureKit. The page is asked (through Apple Events
@@ -73,7 +74,7 @@ final class VideoMirror {
 
     func attach(_ layer: CALayer) {
         sinks.add(layer)
-        if let lastSurface { layer.contents = lastSurface }
+        if let lastSurface { layer.contents = lastSurface } else if let image = frames.image { layer.contents = image }
     }
 
     // MARK: Start / stop
@@ -81,6 +82,12 @@ final class VideoMirror {
     private func begin() {
         status = .starting
         hasFrame = false
+        // Safari hands over frames itself through Pergola's extension: no screen recording needed.
+        if let bundleID, Self.isSafari(bundleID) {
+            startPolling()
+            refresh()
+            return
+        }
         if !CGPreflightScreenCaptureAccess() {
             if !askedPermission { askedPermission = true; CGRequestScreenCaptureAccess() }
             status = .noPermission
@@ -97,6 +104,7 @@ final class VideoMirror {
         if let stream { Task { try? await stream.stopCapture() } }
         stream = nil; output = nil; spot = nil
         lastSurface = nil
+        frames.image = nil
         status = .off
         hasFrame = false
     }
@@ -139,6 +147,7 @@ final class VideoMirror {
     }
 
     private func apply(_ found: Result<Spot, Status>) {
+        Log.media.info("video apply \(String(describing: found), privacy: .public)")
         switch found {
         case .failure(let why):
             if stream != nil { Task { [stream] in try? await stream?.stopCapture() } }
@@ -147,6 +156,12 @@ final class VideoMirror {
         case .success(let new):
             if new.protected { status = .protected }
             aspect = max(0.5, min(3, new.video.width / max(new.video.height, 1)))
+            if let bundleID, Self.isSafari(bundleID) {
+                // The frames come from the page; nothing to capture.
+                if status != .protected { status = hasFrame ? .live : .starting }
+                spot = new
+                return
+            }
             if new == spot, stream != nil { return }
             let moved = spot.map { $0.window.size == new.window.size } ?? false
             spot = new
@@ -179,6 +194,7 @@ final class VideoMirror {
             self.output = output
             if status != .protected { status = .live }
         } catch {
+            Log.media.error("video capture failed: \(String(describing: error), privacy: .public)")
             Log.media.error("video mirror: \(error.localizedDescription, privacy: .public)")
             status = .noPermission
         }
@@ -236,8 +252,23 @@ final class VideoMirror {
     }
 
     /// A report from the extension (through Pergola's local API). Returns its reply.
+    @ObservationIgnored private var reportCount = 0
+    @ObservationIgnored private var frameCount = 0
+    /// The latest frame as an image, for views that bend it (the water).
+    let frames = VideoFrames()
+    @ObservationIgnored private var lastReport: [String: Any] = [:]
+    var debugInfo: [String: Any] {
+        return ["reports": reportCount, "last": lastReport.mapValues { "\($0)" }, "status": String(describing: status),
+         "users": Array(users), "hasFrame": hasFrame, "streaming": stream != nil,
+         "spot": spot.map { "\($0.window) \($0.video)" } ?? "none",
+         "permission": CGPreflightScreenCaptureAccess(), "frames": frameCount, "extension": extensionEnabled.map { "\($0)" } ?? "unknown"]
+    }
+
     func report(_ j: [String: Any]) -> [String: Any] {
+        reportCount += 1
+        lastReport = j
         extensionEnabled = true
+        Log.media.info("video report tab=\((j["tab"] as? Int) ?? -1, privacy: .public) gone=\(j["gone"] != nil, privacy: .public) playing=\((j["playing"] as? Bool) ?? false, privacy: .public) users=\(self.users.count, privacy: .public) status=\(String(describing: self.status), privacy: .public)")
         let tab = (j["tab"] as? Int) ?? -1
         func num(_ k: String) -> CGFloat? { (j[k] as? NSNumber).map { CGFloat($0.doubleValue) } }
         var spot: Spot?
@@ -258,19 +289,51 @@ final class VideoMirror {
             }
         }
         if j["gone"] != nil { tabs[tab] = nil } else {
+            // "Visible" means the tab is the one showing in its window; it may well be covered by other
+            // windows (that's when picture in picture is wanted), which the page itself calls hidden.
             tabs[tab] = TabReport(spot: spot, playing: (j["playing"] as? Bool) ?? false,
-                                  visible: (j["visible"] as? Bool) ?? true, at: Date())
+                                  visible: (j["active"] as? Bool) ?? true, at: Date())
         }
         tabs = tabs.filter { Date().timeIntervalSince($0.value.at) < 30 }
         // Follow scrolling and resizing right away rather than at the next check.
         if !users.isEmpty, let bundleID, Self.isSafari(bundleID), status != .noPermission {
             if let best = bestTab() { apply(.success(best)) } else if stream != nil { apply(.failure(.noVideo)) }
         }
+        var reply: [String: Any] = ["frames": wantsPageFrames]
         if let p = pendingCommand, p.tab == tab || tabs[p.tab] == nil {
             pendingCommand = nil
-            return ["command": p.command]
+            reply["command"] = p.command
         }
-        return [:]
+        return reply
+    }
+
+    private var wantsPageFrames: Bool { !users.isEmpty && (bundleID.map(Self.isSafari) ?? false) }
+
+    /// A frame straight from the page's <video>, sent by the extension as `tab|data:image/jpeg;base64,…`
+    /// (or a small JSON note when paused or unreadable). The reply tells it whether to keep going.
+    func pageFrame(_ body: Data) -> [String: Any] {
+        let wanted = wantsPageFrames
+        guard wanted else { return ["frames": false] }
+        if body.first == UInt8(ascii: "{") {
+            if let j = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any], j["frameError"] != nil {
+                status = .protected
+            }
+            return ["frames": true]
+        }
+        guard let comma = body.firstIndex(of: UInt8(ascii: ",")),
+              let data = Data(base64Encoded: body[body.index(after: comma)...]),
+              let src = CGImageSourceCreateWithData(data as CFData, nil),
+              let image = CGImageSourceCreateImageAtIndex(src, 0, nil) else { return ["frames": true] }
+        frameCount += 1
+        aspect = max(0.5, min(3, CGFloat(image.width) / CGFloat(max(image.height, 1))))
+        if status != .live { status = .live }
+        if !hasFrame { hasFrame = true }
+        frames.image = image
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        for layer in sinks.allObjects { layer.contents = image }
+        CATransaction.commit()
+        return ["frames": true]
     }
 
     // MARK: Native picture-in-picture (protected video)
@@ -431,4 +494,10 @@ struct VideoSurface: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: NSView, context: Context) {}
+}
+
+/// The latest video frame, observable on its own so only the views that draw it redraw 30 times a second.
+@Observable @MainActor
+final class VideoFrames {
+    var image: CGImage?
 }
