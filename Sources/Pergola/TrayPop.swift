@@ -17,8 +17,8 @@ final class TrayPops {
     /// Where each tile's icon is, so a removal knows where to pop (notch window coordinates).
     @ObservationIgnored var iconRects: [UUID: CGRect] = [:]
 
-    static let swell = 0.17
-    static let burst = 0.42
+    static let swell = 0.12
+    static let burst = 0.31
     static var length: Double { swell + burst }
 
     func pop(_ item: TrayItem, delay: Double = 0) {

@@ -140,7 +140,7 @@ final class AppModel {
 
     /// Takes files out of the tray: each pops in a bubble of glass (one after another, for several).
     func popOutOfTray(_ items: [TrayItem]) {
-        for (i, item) in items.prefix(12).enumerated() { trayPops.pop(item, delay: Double(i) * 0.06) }
+        for (i, item) in items.prefix(12).enumerated() { trayPops.pop(item, delay: Double(i) * 0.045) }
         if Prefs.d.bool(forKey: Prefs.haptics) {
             NSHapticFeedbackManager.defaultPerformer.perform(.generic, performanceTime: .now)
         }
