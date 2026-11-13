@@ -34,6 +34,7 @@ final class NotchWindowController {
 
     private var ui: NotchUI { model.ui }
     var contentView: NSView? { panel.contentView }
+    private lazy var catcher = DragCatcher(model: model)
 
     init(model: AppModel) {
         self.model = model
@@ -222,6 +223,7 @@ final class NotchWindowController {
             }
             // Only touch the drag pasteboard when the button is released, not 120 times a second.
             if wasMouseDown { idleDragCount = dragPasteboard.changeCount }
+            catcher.stop()
             wasMouseDown = false
             draggingFiles = false
             return
@@ -233,6 +235,8 @@ final class NotchWindowController {
                   dragPasteboard.types?.contains(.fileURL) == true else { return }
             draggingFiles = true
         }
+        // Over the notch, the dragged file would be drawn underneath it: track the drag picture.
+        catcher.track(area: ui.expanded ? expandedHotRect.insetBy(dx: -80, dy: -80) : collapsedHotRect.insetBy(dx: -140, dy: -110))
         // Files dragged anywhere near the notch open the tray (a generous area, so you needn't aim).
         if !ui.expanded, collapsedHotRect.insetBy(dx: -120, dy: -90).contains(NSEvent.mouseLocation) {
             ui.bigArt = false
@@ -457,4 +461,86 @@ final class NotchHostingView: NSHostingView<AnyView> {
         }
         return true
     }
+}
+
+/// The notch lives in a private space that draws above everything, the system's drag picture
+/// included, and macOS sends windows in that space no drag updates. So while files are dragged near
+/// the notch, this invisible ordinary window sits over it to receive them, and passes the exact drag
+/// picture (images and frames) to the notch, which draws it on top of itself.
+@MainActor
+final class DragCatcher {
+    private unowned let model: AppModel
+    private var window: NSWindow?
+
+    init(model: AppModel) { self.model = model }
+
+    func track(area: CGRect) {
+        let w: NSWindow
+        if let window { w = window } else {
+            w = NSPanel(contentRect: area, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+            w.backgroundColor = .clear
+            w.isOpaque = false
+            w.hasShadow = false
+            w.level = .mainMenu + 3
+            w.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
+            // Almost invisible, but not fully: a fully clear window is skipped when routing the drag.
+            let view = CatcherView(frame: CGRect(origin: .zero, size: area.size))
+            view.onUpdate = { [weak self] parts in self?.show(parts) }
+            w.contentView = view
+            window = w
+        }
+        if w.frame != area { w.setFrame(area, display: false) }
+        if !w.isVisible { w.orderFrontRegardless() }
+    }
+
+    func stop() {
+        window?.orderOut(nil)
+        if !model.dragGhost.parts.isEmpty { model.dragGhost.parts = [] }
+    }
+
+    /// Screen rects → the notch window's own coordinates (top-left origin).
+    private func show(_ parts: [(NSImage, CGRect)]) {
+        let panel = model.ui.panelFrame
+        model.dragGhost.parts = parts.map { image, r in
+            .init(image: image, frame: CGRect(x: r.minX - panel.minX, y: panel.maxY - r.maxY, width: r.width, height: r.height))
+        }
+    }
+}
+
+private final class CatcherView: NSView {
+    var onUpdate: (([(NSImage, CGRect)]) -> Void)?
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        registerForDraggedTypes([.fileURL, .URL, .string, .png, .tiff, .pdf])
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.black.withAlphaComponent(0.002).cgColor
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    private func report(_ sender: NSDraggingInfo) {
+        guard let window else { return }
+        var parts: [(NSImage, CGRect)] = []
+        sender.enumerateDraggingItems(options: [], for: self, classes: [NSPasteboardItem.self], searchOptions: [:]) { item, _, _ in
+            let origin = item.draggingFrame.origin
+            for c in item.imageComponents ?? [] {
+                let local = c.frame.offsetBy(dx: origin.x, dy: origin.y)
+                let onScreen = window.convertToScreen(self.convert(local, to: nil))
+                if let image = c.contents as? NSImage {
+                    parts.append((image, onScreen))
+                } else if let contents = c.contents, CFGetTypeID(contents as CFTypeRef) == CGImage.typeID {
+                    parts.append((NSImage(cgImage: contents as! CGImage, size: local.size), onScreen))
+                }
+            }
+        }
+        onUpdate?(parts)
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation { report(sender); return .copy }
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation { report(sender); return .copy }
+    override func draggingExited(_ sender: NSDraggingInfo?) { onUpdate?([]) }
+    override func draggingEnded(_ sender: NSDraggingInfo) { onUpdate?([]) }
+    override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool { true }
+    // The notch itself takes the files when the button is let go (see trackFileDrag).
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool { onUpdate?([]); return true }
 }
