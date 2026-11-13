@@ -179,7 +179,8 @@ final class NotchWindowController {
             // Once the pointer arrives on a keyboard-opened notch, the usual hover rules take over.
             if keyboardPinned, onScreen, expandedHotRect.contains(mouse) { keyboardPinned = false }
             let keepOpen = (onScreen && expandedHotRect.contains(mouse)) || openMenus > 0 || pressBeganInside || keyboardPinned
-                || (draggingFiles && expandedHotRect.insetBy(dx: -30, dy: -30).contains(mouse))
+                // Dragging files, it stays open over a wide area around it (and below it, where it reaches out).
+                || (draggingFiles && expandedHotRect.insetBy(dx: -160, dy: -40).union(expandedHotRect.offsetBy(dx: 0, dy: -260)).contains(mouse))
             if keepOpen {
                 leaveStart = nil
             } else {
@@ -232,7 +233,8 @@ final class NotchWindowController {
                   dragPasteboard.types?.contains(.fileURL) == true else { return }
             draggingFiles = true
         }
-        if !ui.expanded, collapsedHotRect.insetBy(dx: -20, dy: -8).contains(NSEvent.mouseLocation) {
+        // Files dragged anywhere near the notch open the tray (a generous area, so you needn't aim).
+        if !ui.expanded, collapsedHotRect.insetBy(dx: -120, dy: -90).contains(NSEvent.mouseLocation) {
             ui.bigArt = false
             ui.tab = .tray
             setExpanded(true)

@@ -157,6 +157,7 @@ struct GooFrame {
     var notchRadius: CGFloat = 24
     var notchAttach: CGFloat = 0
     var icon: NSImage?
+    var iconFrame: CGRect?
     var iconAlpha: Double = 1
     var squash = CGSize(width: 1, height: 1)
 
@@ -172,45 +173,47 @@ final class Goo {
     var frame = GooFrame()
 }
 
-/// The water: the drop and the open notch's bulge are two shapes of the same clear Liquid Glass, so
-/// they melt into one where their necks meet.
+/// Clear water: no frosting, no blur, the tray and desktop show straight through. What makes it read
+/// as water is light: a bright rim that's strongest on top, a soft glint, and a faint shadow edge
+/// underneath. The drop and the notch's bulge are one path, so where they meet there's no seam.
 struct GooView: View {
     let goo: Goo
 
     var body: some View {
         let f = goo.frame
-        let box = f.bounds
-        let anchor = CGPoint(x: f.anchor.x - box.minX, y: f.anchor.y - box.minY)
         ZStack(alignment: .topLeading) {
             if f.visible {
-                GlassEffectContainer(spacing: 16) {
-                    ZStack(alignment: .topLeading) {
-                        if let b = f.body {
-                            Color.clear
-                                .frame(width: box.width, height: box.height)
-                                .glassEffect(.clear, in: LiquidShape(body: b.offsetBy(dx: -box.minX, dy: -box.minY), radius: f.radius,
-                                                                     anchor: anchor, neck: f.neck, attach: f.attach))
-                        }
-                        if let n = f.notch, f.notchAttach > 0.005 {
-                            let local = n.offsetBy(dx: -box.minX, dy: -box.minY)
-                            Color.clear
-                                .frame(width: box.width, height: box.height)
-                                .glassEffect(.clear, in: LiquidShape(body: local, radius: f.notchRadius, anchor: anchor,
-                                                                     neck: f.neck, attach: f.notchAttach, flip: true))
-                                // Only what reaches out below the notch's edge: the notch above is real.
-                                .mask(alignment: .topLeading) {
-                                    Rectangle()
-                                        .frame(width: box.width, height: max(0, box.height - (local.maxY - 2)))
-                                        .offset(y: local.maxY - 2)
-                                }
-                        }
+                let water = WaterPath(frame: f)
+                ZStack {
+                    water.fill(.white.opacity(0.06))
+                    // Rim light: bright along the top, fading down the sides.
+                    water.stroke(LinearGradient(colors: [.white.opacity(0.75), .white.opacity(0.18), .white.opacity(0.35)],
+                                                startPoint: .top, endPoint: .bottom), lineWidth: 1.3)
+                    // A faint darker edge just inside, so it reads against light backgrounds too.
+                    water.stroke(.black.opacity(0.18), lineWidth: 3).blur(radius: 1.5).mask(water)
+                    if let b = f.body {
+                        // The glint.
+                        Ellipse()
+                            .fill(LinearGradient(colors: [.white.opacity(0.55), .white.opacity(0)], startPoint: .top, endPoint: .bottom))
+                            .frame(width: b.width * 0.45, height: b.height * 0.2)
+                            .position(x: b.minX + b.width * 0.36, y: b.minY + b.height * 0.17)
+                            .blur(radius: 1)
                     }
-                    .frame(width: box.width, height: box.height, alignment: .topLeading)
                 }
-                .frame(width: box.width, height: box.height, alignment: .topLeading)
-                .offset(x: box.minX, y: box.minY)
+                .compositingGroup()
+                // No rim along the notch's own edge, where the bulge joins it.
+                .mask {
+                    if let n = f.notch {
+                        VStack(spacing: 0) {
+                            Color.clear.frame(height: max(0, n.maxY + 1))
+                            LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom).frame(height: 7)
+                            Color.black
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    } else { Color.black }
+                }
 
-                if let b = f.body, let icon = f.icon {
+                if let b = f.iconFrame, let icon = f.icon {
                     let side = min(b.width / max(f.squash.width, 0.01), b.height / max(f.squash.height, 0.01)) * 0.68
                     Image(nsImage: icon)
                         .resizable()
@@ -224,7 +227,27 @@ struct GooView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .allowsHitTesting(false)
-        .environment(\.colorScheme, .dark)
+    }
+}
+
+/// The drop plus the part of the notch's bulge below its edge, as one shape.
+struct WaterPath: Shape {
+    let frame: GooFrame
+
+    func path(in _: CGRect) -> Path {
+        let f = frame
+        var p = Path()
+        if let b = f.body {
+            p.addPath(LiquidShape(body: b, radius: f.radius, anchor: f.anchor, neck: f.neck, attach: f.attach).path(in: .zero))
+        }
+        if let n = f.notch, f.notchAttach > 0.005 {
+            let bulge = LiquidShape(body: n, radius: f.notchRadius, anchor: f.anchor, neck: f.neck, attach: f.notchAttach, flip: true)
+                .path(in: .zero)
+            // Only what reaches out below the notch's edge: the notch above is real.
+            let below = Path(CGRect(x: n.minX - 50, y: n.maxY - 1, width: n.width + 100, height: 400))
+            p.addPath(bulge.intersection(below))
+        }
+        return p.normalized(eoFill: false)
     }
 }
 
@@ -396,7 +419,7 @@ final class LiquidTray {
         guard phase == .idle || phase == .reaching else { return }
         let n = openNotch
         let gap = n.minY - mouse.y
-        guard model.ui.expanded, gap > 0, gap < 170, mouse.x > n.minX - 40, mouse.x < n.maxX + 40 else { endReach(); return }
+        guard model.ui.expanded, gap > 0, gap < 260, mouse.x > n.minX - 160, mouse.x < n.maxX + 160 else { endReach(); return }
         if phase != .reaching {
             phase = .reaching
             icon = nil
@@ -409,7 +432,7 @@ final class LiquidTray {
             startTimer()
         }
         body.aim(center: mouse)
-        let u = max(0, min(1, 1 - gap / 170))
+        let u = max(0, min(1, 1 - gap / 260))
         let a = u * u * (3 - 2 * u)
         attach.target = a
         notchAttach.target = a
@@ -491,10 +514,14 @@ final class LiquidTray {
         var f = GooFrame()
         f.visible = true
         let n = openNotch
-        let showsBody = phase == .pulling || phase == .returning || phase == .popping || phase == .reaching
         let b = body.rect
+        // Inside the notch only the icon moves (the tray stays uncovered); it turns to water as it
+        // crosses the edge.
+        let outside = b.maxY < n.minY + 8
+        let showsBody = phase == .pulling || phase == .returning || phase == .popping || phase == .reaching
         if showsBody {
-            f.body = local(b)
+            f.body = outside ? local(b) : nil
+            f.iconFrame = local(b)
             f.radius = radius.x
             f.icon = icon
             f.iconAlpha = Double(max(0, min(1, iconAlpha.x)))
