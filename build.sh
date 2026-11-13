@@ -54,4 +54,6 @@ if [[ "${1:-}" == "--install" ]]; then
     rm -rf /Applications/Pergola.app
     ditto "$APP" /Applications/Pergola.app
     echo "Installed /Applications/Pergola.app"
+    # Installing quits the running copy; start the new one straight away.
+    open /Applications/Pergola.app
 fi
