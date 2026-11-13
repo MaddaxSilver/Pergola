@@ -82,6 +82,8 @@ struct WaterFrame: Equatable {
     /// The open notch's outline, which the water never draws inside.
     var notch: CGRect = .zero
     var notchRadius: CGFloat = 34
+    /// The surface's curvature where the water leaves (a rounded corner), or effectively flat.
+    var surfaceCurve: CGFloat = 100_000
     /// The open notch's bottom edge (the water's surface) and where along it the water pulls down.
     var edgeY: CGFloat = 0
     var anchorX: CGFloat = 0
@@ -98,6 +100,8 @@ struct WaterFrame: Equatable {
     /// Once apart: the surface's bulge springing back, and the drop's tail snapping into it.
     var bump: CGFloat = 0
     var tail: CGFloat = 0
+    /// The bubble has burst: 0…1 through the spray of droplets flying off.
+    var burst: CGFloat?
     var alpha: Double = 1
     var icon: NSImage?
     var iconFrame: CGRect?
@@ -127,7 +131,7 @@ struct WaterShape: Shape {
         let E: CGFloat = 0
         // The base tucks a little way into the notch (where it's never drawn) as a shallow wedge, so
         // it stays inside even where the outline curves away at the corners and sides.
-        let apex = CGPoint(x: 0, y: -12)
+        let apex = CGPoint(x: 0, y: -min(12, f.surfaceCurve * 0.3))
         // Too far off to the side to bridge without turning into a thin film: real water wouldn't
         // join yet, so the surface reaches with a dome and the drop stays apart.
         let bridgeable = abs(f.center.x - f.anchorX) < f.foot + f.rx * 0.6
@@ -139,14 +143,15 @@ struct WaterShape: Shape {
             let theta = asin(max(0.12, min(0.97, (w / 2 + 2) / max(f.rx, 1))))
             let tL = point(theta), tR = point(2 * .pi - theta)
             let h: CGFloat = 0.38
-            let footL = CGPoint(x: f.anchorX - f.foot, y: E), footR = CGPoint(x: f.anchorX + f.foot, y: E)
+            let fl = foot(-1, f.foot), fr = foot(1, f.foot)
+            let footL = fl.point, footR = fr.point
             // A drop off to one side bends the neck toward it; the base stays flat on the surface.
             let bend = max(-f.foot * 0.8, min(f.foot * 0.8, (f.center.x - f.anchorX) * 0.5))
             let neckL = CGPoint(x: f.anchorX + bend - w / 2, y: neckY), neckR = CGPoint(x: f.anchorX + bend + w / 2, y: neckY)
             let spreadL = max(0, neckL.x - footL.x), spreadR = max(0, footR.x - neckR.x)
             p.move(to: apex)
             p.addLine(to: footL)
-            p.addCurve(to: neckL, control1: CGPoint(x: footL.x + spreadL * 0.62, y: E),
+            p.addCurve(to: neckL, control1: CGPoint(x: footL.x + fl.toward.x * spreadL * 0.62, y: footL.y + fl.toward.y * spreadL * 0.62),
                        control2: CGPoint(x: neckL.x, y: neckY - (neckY - E) * 0.6))
             let tanL = tangent(theta)
             p.addCurve(to: tL, control1: CGPoint(x: neckL.x, y: neckY + (tL.y - neckY) * 0.6),
@@ -156,7 +161,7 @@ struct WaterShape: Shape {
             p.addCurve(to: neckR, control1: CGPoint(x: tR.x + tanR.x * h, y: tR.y + tanR.y * h),
                        control2: CGPoint(x: neckR.x, y: neckY + (tR.y - neckY) * 0.6))
             p.addCurve(to: footR, control1: CGPoint(x: neckR.x, y: neckY - (neckY - E) * 0.6),
-                       control2: CGPoint(x: footR.x - spreadR * 0.62, y: E))
+                       control2: CGPoint(x: footR.x + fr.toward.x * spreadR * 0.62, y: footR.y + fr.toward.y * spreadR * 0.62))
             p.closeSubpath()
             return p
         }
@@ -164,13 +169,40 @@ struct WaterShape: Shape {
         if f.bump > 0.4 || (f.connected && !bridgeable) {
             let m = min(max(f.foot * 0.75, f.bump * 1.15), 58, f.foot)
             let bumpDepth = min(max(f.bump, f.connected ? 16 : 0), m * 1.25) // a dome, never a spike
-            let footL = CGPoint(x: f.anchorX - m, y: E), footR = CGPoint(x: f.anchorX + m, y: E)
+            let fl = foot(-1, m), fr = foot(1, m)
+            let footL = fl.point, footR = fr.point
             let peak = CGPoint(x: f.anchorX, y: E + bumpDepth)
             p.move(to: apex)
             p.addLine(to: footL)
-            p.addCurve(to: peak, control1: CGPoint(x: footL.x + m * 0.55, y: E), control2: CGPoint(x: peak.x - m * 0.45, y: peak.y))
-            p.addCurve(to: footR, control1: CGPoint(x: peak.x + m * 0.45, y: peak.y), control2: CGPoint(x: footR.x - m * 0.55, y: E))
+            p.addCurve(to: peak, control1: CGPoint(x: footL.x + fl.toward.x * m * 0.55, y: footL.y + fl.toward.y * m * 0.55),
+                       control2: CGPoint(x: peak.x - m * 0.45, y: peak.y))
+            p.addCurve(to: footR, control1: CGPoint(x: peak.x + m * 0.45, y: peak.y),
+                       control2: CGPoint(x: footR.x + fr.toward.x * m * 0.55, y: footR.y + fr.toward.y * m * 0.55))
             p.closeSubpath()
+        }
+        // Burst: the bubble's skin flashes outward as a thin ring and breaks into droplets that fly
+        // off and shrink away.
+        if let b = f.burst {
+            if b < 0.45 {
+                let k = b / 0.45
+                let grow = 1 + 0.4 * k
+                let thick = 5 * (1 - k)
+                var ring = Path(ellipseIn: CGRect(x: f.center.x - f.rx * grow, y: f.center.y - f.ry * grow,
+                                                  width: 2 * f.rx * grow, height: 2 * f.ry * grow))
+                ring = ring.subtracting(Path(ellipseIn: CGRect(x: f.center.x - f.rx * grow + thick, y: f.center.y - f.ry * grow + thick,
+                                                               width: 2 * (f.rx * grow - thick), height: 2 * (f.ry * grow - thick))))
+                p.addPath(ring)
+            }
+            let count = 11
+            for i in 0..<count {
+                let a = CGFloat(i) / CGFloat(count) * 2 * .pi + 0.35
+                let dist = f.rx * (1.0 + 1.5 * b) * (i % 3 == 0 ? 1.15 : 1)
+                let size = max(0, (i % 2 == 0 ? 8 : 5.5) * (1 - b * b))
+                guard size > 0.4, b > 0.12 else { continue }
+                let c = CGPoint(x: f.center.x + cos(a) * dist, y: f.center.y + sin(a) * dist)
+                p.addEllipse(in: CGRect(x: c.x - size, y: c.y - size, width: 2 * size, height: 2 * size))
+            }
+            return p
         }
         // The drop, with its tail if it has one.
         if f.hasDrop {
@@ -191,6 +223,15 @@ struct WaterShape: Shape {
             }
         }
         return p
+    }
+
+    /// Where the water's base meets the surface on one side (-1 left, +1 right), `length` along it,
+    /// and the direction along the surface back toward the middle. Follows a curved corner.
+    private func foot(_ side: CGFloat, _ length: CGFloat) -> (point: CGPoint, toward: CGPoint) {
+        let R = max(f.surfaceCurve, 1)
+        let phi = min(length / R, 1.15)
+        let point = CGPoint(x: f.anchorX + side * R * sin(phi), y: -R * (1 - cos(phi)))
+        return (point, CGPoint(x: -side * cos(phi), y: sin(phi)))
     }
 
     private func addArc(_ p: inout Path, from a: CGFloat, to b: CGFloat) {
@@ -279,6 +320,10 @@ final class LiquidTray {
     private var pullStart = CGPoint.zero
     private var icon: NSImage?
     private var broken = false
+    /// The bubble around the file has burst; the file goes on alone.
+    private var popped = false
+    private var popStart = Date.distantPast
+    private let follower = IconFollower()
     private var lastTick = CACurrentMediaTime()
 
     private static let radius: CGFloat = 30
@@ -302,7 +347,10 @@ final class LiquidTray {
         // pull:<dx>,<dy> / reach:<dx>,<dy>, in points from the open notch's bottom centre (dy down).
         let parts = spec.split(separator: ":")
         let nums = (parts.last ?? "").split(separator: ",").compactMap { Double($0) }.map { CGFloat($0) }
-        let dx = nums.count > 1 ? nums[0] : 0, dy = nums.last ?? 0
+        // Add ",go" to let go once there (like a real drop), which ends the test.
+        let dx = nums.count > 1 ? nums[0] : 0, dy = nums.count > 1 ? nums[1] : (nums.first ?? 0)
+        let release = spec.contains(",go")
+        let glide: Double = spec.contains("slow") ? 3.0 : 0.8
         let n = openNotch
         if parts.first == "reach" {
             demoMouse = CGPoint(x: n.midX + dx, y: n.minY - dy)
@@ -316,10 +364,16 @@ final class LiquidTray {
             let start = Date()
             Timer.scheduledTimer(withTimeInterval: 1.0 / 60, repeats: true) { [weak self] t in
                 MainActor.assumeIsolated {
-                    let k = min(1, Date().timeIntervalSince(start) / 0.8)
+                    let k = min(1, Date().timeIntervalSince(start) / glide)
                     // Out through the bottom, then across to the side if asked.
                     self?.demoMouse = CGPoint(x: slot.midX + dx * k, y: slot.midY - (dy + 50) * k)
-                    if k >= 1 { t.invalidate() }
+                    if k >= 1 {
+                        t.invalidate()
+                        if release {
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { self?.demoDown = false }
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { self?.demoMouse = nil }
+                        }
+                    }
                 }
             }
         }
@@ -339,7 +393,7 @@ final class LiquidTray {
 
     /// The nearest point on the open notch's outline to `p` (screen coordinates), the outward
     /// direction there, and how far outside the outline `p` is (negative inside).
-    private func outline(_ p: CGPoint) -> (point: CGPoint, normal: CGPoint, distance: CGFloat, room: CGFloat) {
+    private func outline(_ p: CGPoint) -> (point: CGPoint, normal: CGPoint, distance: CGFloat, room: CGFloat, curve: CGFloat) {
         let n = openNotch, cr = NotchMetrics.expandedBottomRadius
         let q = CGPoint(x: min(max(p.x, n.minX + cr), n.maxX - cr), y: min(max(p.y, n.minY + cr), n.maxY))
         var v = CGPoint(x: p.x - q.x, y: p.y - q.y)
@@ -347,24 +401,14 @@ final class LiquidTray {
         if len < 0.001 { v = CGPoint(x: 0, y: -1); len = 0 }
         let normal = len > 0 ? CGPoint(x: v.x / len, y: v.y / len) : v
         let point = CGPoint(x: q.x + normal.x * cr, y: q.y + normal.y * cr)
-        // Inside the core (well within the notch): how deep, roughly.
         let distance = len > 0 ? len - cr : -min(p.y - (n.minY + cr), p.x - n.minX, n.maxX - p.x) - cr
-        // Water clings to flat surface: near a rounded corner it leaves from the nearer flat stretch
-        // (bottom or side), just inside the corner, and bends toward the file from there. The
-        // `room` is how far the surface runs flat either side, which the water may spread over.
-        let margin: CGFloat = 20
-        var anchor = point, out = normal
-        if p.y < n.minY + 4 || (q.x > n.minX + cr && q.x < n.maxX - cr) {
-            anchor = CGPoint(x: min(max(p.x, n.minX + cr + margin), n.maxX - cr - margin), y: n.minY)
-            out = CGPoint(x: 0, y: -1)
-        } else {
-            anchor = CGPoint(x: normal.x < 0 ? n.minX : n.maxX, y: min(max(p.y, n.minY + cr + margin), n.maxY - margin))
-            out = CGPoint(x: normal.x < 0 ? -1 : 1, y: 0)
-        }
-        let room = out.y != 0 ? min(anchor.x - (n.minX + cr), (n.maxX - cr) - anchor.x)
-                              : min(anchor.y - (n.minY + cr), n.maxY - anchor.y)
-        let point2 = anchor, normal2 = out
-        return (point2, normal2, distance, room)
+        // On a rounded corner the surface is curved (radius `curve`) and the water's base follows it;
+        // on the flat bottom or sides it may spread `room` either way before reaching a corner.
+        let onCorner = (p.x < n.minX + cr || p.x > n.maxX - cr) && p.y < n.minY + cr
+        if onCorner { return (point, normal, distance, cr * 1.05, cr) }
+        let room = abs(normal.y) > 0.5 ? min(q.x - (n.minX + cr), (n.maxX - cr) - q.x) + 12
+                                       : min(q.y - (n.minY + cr), n.maxY - q.y) + 12
+        return (point, normal, distance, max(14, room), 100_000)
     }
 
     /// Screen y → the notch window's y (top-left origin).
@@ -382,6 +426,7 @@ final class LiquidTray {
         guard phase == .idle || phase == .reaching || phase == .settling else { return }
         phase = .pulling
         broken = false
+        popped = false
         connected = false
         hasDrop = true
         self.icon = icon
@@ -402,6 +447,9 @@ final class LiquidTray {
         if broken {
             drop.aim(center: mouse)
             stretchWithSpeed()
+            // Far enough from the notch, the bubble around the file pops.
+            if !popped, outline(drop.center).distance > 190 || !model.ui.panelFrame.insetBy(dx: 50, dy: 50).contains(drop.center) { pop() }
+            if popped { follower.move(to: drop.center) }
             return
         }
         // Out of the notch in any direction: past the outline, surface tension holds it back along
@@ -419,17 +467,21 @@ final class LiquidTray {
         // It stretches along the way it's being pulled.
         drop.sy.target = 1 + 0.2 * t
         drop.sx.target = 1 - 0.09 * t
-        let w = out < r ? 2 * r * 0.92 : 2 * r * 0.9 * pow(1 - t, 1.25) + 2
+        // A wide neck that only thins near the end, on a wide base.
+        let w = out < r ? 2 * r * 0.98 : 2 * r * 0.95 * pow(1 - t, 0.7) + 4
         neck.target = w
-        foot = w / 2 + 16 + 22 * (1 - t)
-        setAnchor(now.point, now.normal, room: now.room)
+        foot = w / 2 + 26 + 30 * (1 - t)
+        setAnchor(now)
         if o.distance > Self.breakPull { letGo(mouse) }
     }
 
-    private func setAnchor(_ point: CGPoint, _ normal: CGPoint, room: CGFloat) {
-        anchorPoint = point
-        anchorNormal = normal
-        foot = min(foot, room + 6)
+    private var surfaceCurve: CGFloat = 100_000
+
+    private func setAnchor(_ o: (point: CGPoint, normal: CGPoint, distance: CGFloat, room: CGFloat, curve: CGFloat)) {
+        anchorPoint = o.point
+        anchorNormal = o.normal
+        surfaceCurve = o.curve
+        foot = min(foot, o.room)
     }
 
     private func letGo(_ mouse: CGPoint) {
@@ -445,6 +497,15 @@ final class LiquidTray {
         drop.sx.target = 1; drop.sy.target = 1
     }
 
+    /// The bubble bursts into droplets; from here the file's icon follows the pointer on its own
+    /// (anywhere on screen, not just near the notch) until it's dropped.
+    private func pop() {
+        popped = true
+        popStart = Date()
+        haptic(.generic)
+        if let icon { follower.show(icon, at: drop.center) }
+    }
+
     private func stretchWithSpeed() {
         let v = drop.velocity
         let s = hypot(v.x, v.y)
@@ -456,6 +517,12 @@ final class LiquidTray {
 
     private func endDragOut() {
         let mouse = pointer
+        follower.hide()
+        if popped {
+            phase = .popping
+            withAnimation(.spring(duration: 0.35, bounce: 0.3)) { model.ui.liftedTrayItem = nil }
+            return
+        }
         if openNotch.insetBy(dx: -6, dy: -6).contains(mouse) && model.ui.expanded {
             // Let go over the notch: it sinks back in.
             phase = .returning
@@ -464,12 +531,12 @@ final class LiquidTray {
             drop.move(response: 0.3, damping: 0.7)
             drop.sx.target = 1; drop.sy.target = 1
         } else {
-            // Dropped somewhere: the drop splashes out and is gone.
+            // Dropped somewhere: the bubble bursts and the file has gone where it was dropped.
             phase = .popping
             connected = false
-            drop.resize(response: 0.2, damping: 0.6)
-            drop.aim(size: CGSize(width: Self.radius * 2.7, height: Self.radius * 2.7))
-            alpha.target = 0
+            if !broken { broken = true }
+            popped = true
+            popStart = Date()
         }
         withAnimation(.spring(duration: 0.35, bounce: 0.3)) { model.ui.liftedTrayItem = nil }
     }
@@ -505,7 +572,7 @@ final class LiquidTray {
         drop.aim(size: CGSize(width: 2 * r * (0.55 + 0.45 * near), height: 2 * r * (0.55 + 0.45 * near)))
         neck.target = 2 * r * (0.35 + 0.35 * max(0, min(1, (56 - gap) / 56)))
         foot = 34 + 22 * u
-        setAnchor(o.point, o.normal, room: o.room)
+        setAnchor(o)
     }
 
     func endReach() {
@@ -525,7 +592,7 @@ final class LiquidTray {
         connected = false
         foot = 46
         let o = outline(NSEvent.mouseLocation)
-        setAnchor(o.point, o.normal, room: o.room)
+        setAnchor(o)
         bump.tune(response: 0.34, damping: 0.3)
         bump.target = 0
         bump.v = 260
@@ -559,7 +626,7 @@ final class LiquidTray {
         var done = false
         switch phase {
         case .returning: done = drop.settled
-        case .popping: done = alpha.x < 0.03
+        case .popping: done = Date().timeIntervalSince(popStart) > 0.5 && abs(bump.x) < 0.3
         case .settling: done = abs(bump.x) < 0.3 && abs(bump.v) < 4
         case .idle: done = true
         case .pulling, .reaching: break
@@ -584,6 +651,7 @@ final class LiquidTray {
         f.angle = angle
         f.notch = CGRect(x: lx(n.minX), y: ly(n.maxY), width: n.width, height: n.height)
         f.notchRadius = NotchMetrics.expandedBottomRadius
+        f.surfaceCurve = surfaceCurve
         f.edgeY = 0
         f.anchorX = 0
         f.foot = foot
@@ -600,14 +668,59 @@ final class LiquidTray {
         f.ry = drop.h.x / 2 * drop.sy.x
         let outside = outline(drop.center).distance > -f.ry
         f.hasDrop = hasDrop && (phase == .reaching || outside)
-        if let icon, phase == .pulling || phase == .returning || phase == .popping {
+        if popped {
+            let b = CGFloat(min(1, Date().timeIntervalSince(popStart) / 0.42))
+            f.burst = b < 1 ? b * (2 - b) : nil // ease out
+            f.hasDrop = f.burst != nil
+        }
+        if let icon, !popped, phase == .pulling || phase == .returning {
             let side: CGFloat = 40
             let ic = CGPoint(x: lx(drop.cx.x), y: ly(drop.cy.x))
             f.icon = icon
             f.iconFrame = CGRect(x: ic.x - side / 2, y: ic.y - side / 2, width: side, height: side)
             f.iconAlpha = f.alpha
         }
-        f.visible = f.hasDrop || f.bump > 0.4 || f.icon != nil
+        f.visible = f.hasDrop || f.bump > 0.4 || f.icon != nil || f.burst != nil
         if f != goo.frame { goo.frame = f }
+    }
+}
+
+/// After the bubble pops, the file's icon follows the pointer in a tiny window of its own, so it's
+/// visible anywhere on screen (the system's own drag picture is hidden for the water).
+@MainActor
+final class IconFollower {
+    private var panel: NSPanel?
+    private let size: CGFloat = 40
+
+    func show(_ icon: NSImage, at p: CGPoint) {
+        let w: NSPanel
+        if let panel { w = panel } else {
+            w = NSPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+            w.backgroundColor = .clear
+            w.isOpaque = false
+            w.hasShadow = false
+            w.ignoresMouseEvents = true
+            w.level = .popUpMenu
+            w.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
+            panel = w
+        }
+        let view = NSImageView(image: icon)
+        view.imageScaling = .scaleProportionallyUpOrDown
+        w.contentView = view
+        w.setFrame(CGRect(x: p.x - size / 2, y: p.y - size / 2, width: size, height: size), display: true)
+        w.alphaValue = 1
+        w.orderFrontRegardless()
+    }
+
+    func move(to p: CGPoint) {
+        panel?.setFrameOrigin(CGPoint(x: p.x - size / 2, y: p.y - size / 2))
+    }
+
+    func hide() {
+        guard let w = panel, w.isVisible else { return }
+        NSAnimationContext.runAnimationGroup({ ctx in
+            ctx.duration = 0.15
+            w.animator().alphaValue = 0
+        }, completionHandler: { MainActor.assumeIsolated { w.orderOut(nil) } })
     }
 }
