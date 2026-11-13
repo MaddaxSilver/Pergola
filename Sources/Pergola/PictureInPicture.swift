@@ -783,6 +783,12 @@ final class PiPController {
             host.sizingOptions = []
             o.contentView = host
             overlay = o
+            o.setFrame(screen.frame, display: false)
+            o.orderFrontRegardless()
+            // The notch lives in its own space above the desktops, which draws over every normal
+            // window. Join it there (at a higher level) so the water shows on top of the open notch,
+            // the enlarged view included.
+            SkyLight.move(o, toLevel: SkyLight.aboveDesktopsLevel)
         }
         o.setFrame(screen.frame, display: false)
         o.sharingType = Prefs.d.bool(forKey: Prefs.hideFromCapture) ? .none : .readOnly
