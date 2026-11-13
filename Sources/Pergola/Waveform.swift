@@ -121,6 +121,7 @@ final class Waveform {
 enum Log {
     static let waveform = Logger(subsystem: "com.pergola.Pergola", category: "waveform")
     static let notch = Logger(subsystem: "com.pergola.Pergola", category: "notch")
+    static let media = Logger(subsystem: "com.pergola.Pergola", category: "media")
 }
 
 struct TapError: LocalizedError {

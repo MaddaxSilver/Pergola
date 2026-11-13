@@ -28,6 +28,17 @@ final class WebMedia {
     private var process: Process?
     private var restarts = 0
     private var wanted = false
+    private var observingQuit = false
+
+    /// Helpers still running from an earlier Pergola that didn't get to stop them.
+    private static func killStrays() {
+        guard let res = Bundle.main.resourceURL?.appendingPathComponent("mediaremote-adapter.pl").path else { return }
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
+        p.arguments = ["-f", res + " "]
+        try? p.run()
+        p.waitUntilExit()
+    }
     nonisolated private static let parseQueue = DispatchQueue(label: "com.pergola.webmedia", qos: .utility)
     /// Merged state of the stream (it sends only what changed); touched only on `parseQueue`.
     nonisolated(unsafe) private static var state: [String: Any] = [:]
@@ -39,6 +50,17 @@ final class WebMedia {
     nonisolated private static let ignored: Set<String> = ["com.apple.Music", "com.spotify.client"]
 
     func setEnabled(_ on: Bool) {
+        if !observingQuit {
+            observingQuit = true
+            // The helper is a separate process: stop it with Pergola, and clear any left by a crash.
+            NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    self?.process?.terminationHandler = nil
+                    self?.process?.terminate()
+                }
+            }
+            Self.killStrays()
+        }
         wanted = on
         if on { start() } else { stop() }
     }
@@ -62,13 +84,14 @@ final class WebMedia {
                 let tracks = Self.consume(chunk)
                 guard !tracks.isEmpty else { return }
                 let latest = tracks.last!
+                Log.media.debug("web: \(latest?.title ?? "nothing", privacy: .private) playing=\(latest?.playing ?? false)")
                 DispatchQueue.main.async { MainActor.assumeIsolated { self?.onChange?(latest) } }
             }
         }
         p.terminationHandler = { [weak self] _ in
             DispatchQueue.main.async { MainActor.assumeIsolated { self?.ended() } }
         }
-        do { try p.run(); process = p } catch { process = nil }
+        do { try p.run(); process = p } catch { process = nil; Log.media.error("web stream failed to start: \(error.localizedDescription, privacy: .public)") }
     }
 
     private func stop() {
