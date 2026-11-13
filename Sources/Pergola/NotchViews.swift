@@ -96,7 +96,7 @@ struct NotchRootView: View {
                 .overlay {
                 // A hairline rim on the open pill, like the edge of a sheet of glass. Faded out across the top
                 // band so no line ever shows along the screen edge or around the hardware notch.
-                let dropGlass = dropShown && liquidGlass
+                let dropGlass = (dropShown || (!ui.expanded && ui.grab > 0.1)) && liquidGlass
                 shape.stroke(.white.opacity(dropGlass ? 0.28 : (ui.expanded ? 0.09 : 0)), lineWidth: 1)
                     .mask(LinearGradient(stops: [.init(color: .clear, location: 0),
                                                  .init(color: .clear, location: min(0.9, (ui.notchSize.height + (dropGlass ? -2 : 6)) / max(size.height, 1))),
@@ -155,8 +155,12 @@ struct NotchRootView: View {
     private var background: some View {
         // An overlay's drop-down line gets the same treatment as the open notch: black around the
         // hardware notch, melting into glass along the bottom.
-        let drop = dropShown
+        // Reaching for the picture-in-picture window, the stretched notch turns to the same Liquid
+        // Glass as the window (black only around the hardware notch), fading in with the stretch.
+        let reach = ui.expanded ? 0 : min(1, max(0, ui.grab * 3))
+        let drop = dropShown || reach > 0
         let glass = (ui.expanded || drop) && liquidGlass
+        let glassAmount: Double = ui.expanded || dropShown ? 1 : Double(reach)
         let art = ui.expanded && ui.bigArt
         let size = bodySize
         // The "Clear Glass ↔ Dark" slider (0.15…0.95) drives the whole look:
@@ -181,7 +185,7 @@ struct NotchRootView: View {
                           start: glass && art ? 0 : fadeStart, end: 1)
                 Color.clear
                     .glassEffect(art ? .regular : .clear, in: shape)
-                    .opacity(glass ? 1 : 0)
+                    .opacity(glass ? glassAmount : 0)
                 if art {
                     ArtWash(image: model.player.artwork)
                         .transition(.opacity)
@@ -189,7 +193,7 @@ struct NotchRootView: View {
                 // Solid black on top of the glass: everything above `fadeStart`, easing out to nothing
                 // just before the bottom edge, so the glass only shows where the pill meets the desktop.
                 // Closed it's solid; opening, its lower part eases away to reveal the glass.
-                BlackFade(top: art ? 0 : 1, bottom: ui.expanded || drop ? 0 : 1,
+                BlackFade(top: art ? 0 : 1, bottom: ui.expanded || drop ? 1 - glassAmount : 1,
                           // Open, the fade is short and ends early, leaving a clear band of glass along the bottom.
                           start: fadeStart + (drop ? 0 : span * 0.1), end: fadeStart + span * (drop ? 0.5 : 0.62))
                 if art {

@@ -2,6 +2,10 @@
 // Nothing about the page itself (no address, no content) leaves this Mac or goes anywhere but Pergola.
 (() => {
   if (window.top !== window) return;
+  // One copy per page, even when re-injected after an update (an older, disconnected copy steps aside).
+  const me = Symbol();
+  window.__pergolaPiP = me;
+  const current = () => window.__pergolaPiP === me;
   let lastSent = "";
   let lastTime = 0;
   let queued = false;
@@ -35,6 +39,7 @@
 
   function report(force) {
     queued = false;
+    if (!current()) return;
     const m = measure();
     const now = Date.now();
     const body = m ? m : { gone: true };
@@ -65,7 +70,7 @@
     streaming = true;
     const ctx = canvas.getContext("2d", { alpha: false });
     let lastTime = -1;
-    while (streaming) {
+    while (streaming && current()) {
       const started = performance.now();
       const v = pick();
       if (!v || v.readyState < 2 || !v.videoWidth) { await sleep(250); continue; }
@@ -108,6 +113,6 @@
   document.addEventListener("visibilitychange", () => report(true));
   document.addEventListener("fullscreenchange", soon);
   // Window moves don't fire events; a light heartbeat catches them (and tells Pergola we're here).
-  setInterval(() => { if (pick()) report(false); }, 1000);
+  const beat = setInterval(() => { if (!current()) { clearInterval(beat); return; } if (pick()) report(false); }, 1000);
   report(true);
 })();

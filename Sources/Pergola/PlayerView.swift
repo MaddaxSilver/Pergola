@@ -372,6 +372,8 @@ struct BigArtView: View {
         case .noJavaScript: return "Turn on View › Developer › Allow JavaScript from Apple Events"
         case .noPermission: return "Allow Pergola in Screen Recording to show the video"
         case .protected: return "This video is protected and can't be shown here"
+        case .reconnecting: return "Connecting to Safari…"
+        case .needsReload: return "Reload the page in Safari to show the video here"
         default: return nil
         }
     }

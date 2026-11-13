@@ -973,6 +973,9 @@ struct PiPView: View {
                 case .noExtension:
                     Button("Turn On in Safari") { model.video.openExtensionSettings() }
                         .buttonStyle(.glassProminent).controlSize(.small)
+                case .needsReload:
+                    Button("Reload the Page") { model.video.reconnect(force: true) }
+                        .buttonStyle(.glassProminent).controlSize(.small)
                 default: EmptyView()
                 }
             }
@@ -988,6 +991,8 @@ struct PiPView: View {
         case .noExtension: return "Turn on the Pergola extension in Safari to show the video here."
         case .noJavaScript: return "Turn on View › Developer › Allow JavaScript from Apple Events in your browser to show the video."
         case .protected: return "This video is protected, so only the browser can show it."
+        case .reconnecting: return "Connecting to Safari…"
+        case .needsReload: return "This page was opened before Pergola updated. Reload it to show the video."
         default: return nil
         }
     }

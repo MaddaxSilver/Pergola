@@ -65,6 +65,12 @@ lipo -create build/PergolaSafari-arm64 build/PergolaSafari-x86_64 -output "$EXT/
 rm -f build/PergolaSafari-arm64 build/PergolaSafari-x86_64
 cp SafariExtension/Info.plist "$EXT/Contents/Info.plist"
 cp -R SafariExtension/Resources/ "$EXT/Contents/Resources/"
+# A new version every build, so Safari treats each Pergola update as an extension update (and the
+# extension re-attaches itself to the tabs that are already open).
+EXTVER="1.$(( $(date +%s) / 86400 % 60000 )).$(( $(date +%s) % 86400 / 2 ))"
+sed -i '' "s/\"version\": \"[0-9.]*\"/\"version\": \"$EXTVER\"/" "$EXT/Contents/Resources/manifest.json"
+plutil -replace CFBundleShortVersionString -string "$EXTVER" "$EXT/Contents/Info.plist"
+plutil -replace CFBundleVersion -string "$EXTVER" "$EXT/Contents/Info.plist"
 sips -s format png -Z 128 "$APP/Contents/Resources/AppIcon.icns" --out "$EXT/Contents/Resources/icon.png" >/dev/null
 codesign --force --sign "${IDENTITY:--}" --entitlements SafariExtension/Extension.entitlements "$EXT"
 codesign --force --sign "${IDENTITY:--}" "$APP"

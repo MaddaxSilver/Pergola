@@ -16,7 +16,7 @@ import CoreImage
 /// asks the browser for its own picture-in-picture instead.
 @Observable @MainActor
 final class VideoMirror {
-    enum Status: Equatable, Error { case off, starting, live, noPermission, noJavaScript, noExtension, noVideo, protected }
+    enum Status: Equatable, Error { case off, starting, live, noPermission, noJavaScript, noExtension, noVideo, protected, reconnecting, needsReload }
 
     private(set) var status: Status = .off
     /// Width ÷ height of the video picture.
@@ -82,6 +82,7 @@ final class VideoMirror {
     private func begin() {
         status = .starting
         hasFrame = false
+        wantedSince = Date()
         // Safari hands over frames itself through Pergola's extension: no screen recording needed.
         if let bundleID, Self.isSafari(bundleID) {
             startPolling()
@@ -105,6 +106,7 @@ final class VideoMirror {
         stream = nil; output = nil; spot = nil
         lastSurface = nil
         frames.image = nil
+        reconnected = false
         status = .off
         hasFrame = false
     }
@@ -128,8 +130,16 @@ final class VideoMirror {
         if Self.isSafari(bundleID) {
             checkExtension()
             if let best = bestTab() { apply(.success(best)); return }
-            // No word from the extension: fall back to asking Safari directly, if that's allowed.
-            if extensionEnabled == true { apply(.failure(.noVideo)); return }
+            if extensionEnabled == true {
+                // The extension is on but the page isn't answering: it was opened before Pergola (and
+                // so its extension) last updated, and only a reload reconnects it.
+                if Date().timeIntervalSince(wantedSince) > 2.5, status != .reconnecting {
+                    if !reconnected { reconnected = true; reconnect() } else if status != .needsReload { status = .needsReload }
+                } else if status != .reconnecting, status != .needsReload {
+                    status = .starting
+                }
+                return
+            }
         }
         checking = true
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
@@ -241,6 +251,41 @@ final class VideoMirror {
         }
     }
 
+    /// Reloads the Safari tab that's playing. YouTube picks up at the same second; other sites are
+    /// only reloaded when you ask (`force`), since they may start over.
+    func reconnect(force: Bool = false) {
+        guard let bundleID, Self.isSafari(bundleID) else { return }
+        let seconds = Int(max(0, elapsed()))
+        status = .reconnecting
+        DispatchQueue.global(qos: .userInitiated).async {
+            let script = """
+            tell application id "\(bundleID)"
+              repeat with w in windows
+                set u to URL of current tab of w
+                if u contains "youtube.com/watch" then
+                  set AppleScript's text item delimiters to "&t="
+                  set u to text item 1 of u
+                  set AppleScript's text item delimiters to ""
+                  set URL of current tab of w to u & "&t=\(seconds)s"
+                  return "ok"
+                end if
+              end repeat
+              if \(force ? "true" : "false") then
+                set URL of current tab of front window to (URL of current tab of front window)
+                return "ok"
+              end if
+              return "none"
+            end tell
+            """
+            let result = Self.runScript(script)
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    if result != "ok" { self.status = .needsReload } else { self.wantedSince = Date() }
+                }
+            }
+        }
+    }
+
     func openExtensionSettings() {
         SFSafariApplication.showPreferencesForExtension(withIdentifier: Self.extensionID) { _ in }
     }
@@ -254,6 +299,10 @@ final class VideoMirror {
     /// A report from the extension (through Pergola's local API). Returns its reply.
     @ObservationIgnored private var reportCount = 0
     @ObservationIgnored private var frameCount = 0
+    @ObservationIgnored private var wantedSince = Date()
+    @ObservationIgnored private var reconnected = false
+    /// Where the video is up to, so a reconnect can pick up at the same moment.
+    @ObservationIgnored var elapsed: () -> Double = { 0 }
     /// The latest frame as an image, for views that bend it (the water).
     let frames = VideoFrames()
     @ObservationIgnored private var lastReport: [String: Any] = [:]
@@ -268,6 +317,7 @@ final class VideoMirror {
         reportCount += 1
         lastReport = j
         extensionEnabled = true
+        if status == .reconnecting || status == .needsReload, j["gone"] == nil { status = .starting }
         Log.media.info("video report tab=\((j["tab"] as? Int) ?? -1, privacy: .public) gone=\(j["gone"] != nil, privacy: .public) playing=\((j["playing"] as? Bool) ?? false, privacy: .public) users=\(self.users.count, privacy: .public) status=\(String(describing: self.status), privacy: .public)")
         let tab = (j["tab"] as? Int) ?? -1
         func num(_ k: String) -> CGFloat? { (j[k] as? NSNumber).map { CGFloat($0.doubleValue) } }

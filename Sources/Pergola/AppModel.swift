@@ -209,6 +209,7 @@ final class AppModel {
         api.onVideoReport = { [weak self] report in self?.video.report(report) ?? [:] }
         api.onVideoDebug = { [weak self] in self?.video.debugInfo ?? [:] }
         api.onVideoFrame = { [weak self] body in self?.video.pageFrame(body) ?? [:] }
+        video.elapsed = { [weak self] in self?.player.currentPosition() ?? 0 }
         api.setEnabled(Prefs.d.bool(forKey: Prefs.activitiesEnabled))
         sensory.start()
         focus.start()
