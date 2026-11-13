@@ -68,8 +68,6 @@ struct NotchRootView: View {
         if model.showsWings { w += 2 * model.closedWingWidth }
         if drop { h += NotchUI.dropHeight } // straight down: an overlay never makes the notch wider
         if ui.hovering { w += 10; h += 3 } // a small lift before it opens
-        // Reaching for the picture-in-picture window: the whole notch stretches toward it.
-        if ui.grab != 0 { w += 26 * ui.grab; h += 30 * ui.grab }
         return CGSize(width: w, height: h)
     }
 
@@ -96,7 +94,7 @@ struct NotchRootView: View {
                 .overlay {
                 // A hairline rim on the open pill, like the edge of a sheet of glass. Faded out across the top
                 // band so no line ever shows along the screen edge or around the hardware notch.
-                let dropGlass = (dropShown || (!ui.expanded && ui.grab > 0.1)) && liquidGlass
+                let dropGlass = dropShown && liquidGlass
                 shape.stroke(.white.opacity(dropGlass ? 0.28 : (ui.expanded ? 0.09 : 0)), lineWidth: 1)
                     .mask(LinearGradient(stops: [.init(color: .clear, location: 0),
                                                  .init(color: .clear, location: min(0.9, (ui.notchSize.height + (dropGlass ? -2 : 6)) / max(size.height, 1))),
@@ -125,8 +123,6 @@ struct NotchRootView: View {
         }
         .opacity(ui.hidden ? 0 : 1)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        // …and leans its way: the top stays on the hardware notch while the bottom swings over.
-        .transformEffect(CGAffineTransform(a: 1, b: 0, c: ui.expanded ? 0 : ui.grabLean * max(0, ui.grab) * 0.8, d: 1, tx: 0, ty: 0))
         .environment(\.colorScheme, .dark)
     }
 
@@ -155,12 +151,9 @@ struct NotchRootView: View {
     private var background: some View {
         // An overlay's drop-down line gets the same treatment as the open notch: black around the
         // hardware notch, melting into glass along the bottom.
-        // Reaching for the picture-in-picture window, the stretched notch turns to the same Liquid
-        // Glass as the window (black only around the hardware notch), fading in with the stretch.
-        let reach = ui.expanded ? 0 : min(1, max(0, ui.grab * 3))
-        let drop = dropShown || reach > 0
+        let drop = dropShown
         let glass = (ui.expanded || drop) && liquidGlass
-        let glassAmount: Double = ui.expanded || dropShown ? 1 : Double(reach)
+        let glassAmount: Double = 1
         let art = ui.expanded && ui.bigArt
         let size = bodySize
         // The "Clear Glass ↔ Dark" slider (0.15…0.95) drives the whole look:

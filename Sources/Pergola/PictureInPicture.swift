@@ -87,8 +87,16 @@ struct LiquidShape: Shape {
     var neck: CGFloat
     /// 0 = a plain rounded rectangle, 1 = fully poured into the anchor.
     var attach: CGFloat
+    /// Upside down: the drop hangs from above and pours *down* into the anchor (the notch's side).
+    var flip = false
 
-    func path(in _: CGRect) -> Path {
+    func path(in r: CGRect) -> Path {
+        if flip {
+            var m = self
+            m.flip = false
+            m.anchor.y = 2 * body.midY - anchor.y
+            return m.path(in: r).applying(CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: 2 * body.midY))
+        }
         let b = body
         let r = max(0, min(radius, b.width / 2, b.height / 2))
         let t = max(0, min(1, attach))
@@ -143,9 +151,15 @@ struct GooFrame {
     var contentAlpha: Double = 1
     /// The body's size before squash and stretch.
     var rest: CGSize = .zero
+    /// The notch's own drop, reaching down for the window (nil when the notch isn't involved).
+    var notch: CGRect?
+    var notchRadius: CGFloat = 10
+    /// False while only the notch is still wobbling after swallowing the window.
+    var showsBody = true
 
     var bounds: CGRect {
-        var r = body
+        var r = showsBody ? body : (notch ?? body)
+        if let notch { r = r.union(notch) }
         if attach > 0.005 { r = r.union(CGRect(x: anchor.x - neck, y: anchor.y - neck, width: 2 * neck, height: 2 * neck)) }
         return r.insetBy(dx: -24, dy: -24).integral
     }
@@ -168,18 +182,34 @@ struct GooView: View {
         let rim = min(Self.rim, f.body.width * 0.06)
         ZStack(alignment: .topLeading) {
             if f.visible {
-                Color.clear
-                    .frame(width: box.width, height: box.height)
-                    .glassEffect(.clear.tint(.white.opacity(0.05)),
-                                 in: LiquidShape(body: f.body.offsetBy(dx: -box.minX, dy: -box.minY), radius: f.radius,
-                                                 anchor: CGPoint(x: f.anchor.x - box.minX, y: f.anchor.y - box.minY),
-                                                 neck: f.neck, attach: f.attach))
-                    .offset(x: box.minX, y: box.minY)
+                let anchor = CGPoint(x: f.anchor.x - box.minX, y: f.anchor.y - box.minY)
+                // The window and the notch are two drops of the same glass: in one container they
+                // melt together where their necks meet.
+                GlassEffectContainer(spacing: 16) {
+                    ZStack(alignment: .topLeading) {
+                        if f.showsBody {
+                            Color.clear
+                                .frame(width: box.width, height: box.height)
+                                .glassEffect(.clear.tint(.white.opacity(0.05)),
+                                             in: LiquidShape(body: f.body.offsetBy(dx: -box.minX, dy: -box.minY), radius: f.radius,
+                                                             anchor: anchor, neck: f.neck, attach: f.attach))
+                        }
+                        if let n = f.notch {
+                            Color.clear
+                                .frame(width: box.width, height: box.height)
+                                .glassEffect(.clear.tint(.white.opacity(0.05)),
+                                             in: LiquidShape(body: n.offsetBy(dx: -box.minX, dy: -box.minY), radius: f.notchRadius,
+                                                             anchor: anchor, neck: f.neck, attach: f.attach, flip: true))
+                        }
+                    }
+                    .frame(width: box.width, height: box.height, alignment: .topLeading)
+                }
+                .frame(width: box.width, height: box.height, alignment: .topLeading)
+                .offset(x: box.minX, y: box.minY)
                 let c = f.body.insetBy(dx: rim, dy: rim)
                 let rest = CGSize(width: max(2, f.rest.width - 2 * rim), height: max(2, f.rest.height - 2 * rim))
-                if c.width > 2, c.height > 2 {
+                if f.showsBody, c.width > 2, c.height > 2 {
                     let local = c.offsetBy(dx: -box.minX, dy: -box.minY)
-                    let anchor = CGPoint(x: f.anchor.x - box.minX, y: f.anchor.y - box.minY)
                     ZStack(alignment: .topLeading) {
                         // Laid out at its resting size, then squashed and stretched with the water.
                         WaterPicture()
@@ -325,6 +355,8 @@ final class PiPController {
     private var brokeAt = Date.distantPast
     private var landingSince = Date.distantPast
     private var popRelease: Date?
+    /// The window being landed came out of the notch (not the art).
+    private var fromNotch = false
     private var grabOffset = CGPoint.zero
     private var dragSamples: [(t: TimeInterval, p: CGPoint)] = []
     private var lastTick = CACurrentMediaTime()
@@ -398,6 +430,7 @@ final class PiPController {
         phase = .pulling
         broken = false
         popRelease = nil
+        fromNotch = false
         self.artRect = artRect
         artRadius = r
         pullStart = mouse
@@ -512,6 +545,8 @@ final class PiPController {
         brokeAt = Date()
         landingSince = Date()
         popRelease = Date().addingTimeInterval(0.28)
+        fromNotch = true
+        grab.snap(0.5); grab.tune(response: 0.4, damping: 0.4); grab.target = 0
         anchor = notchMouth
         body.snap(CGRect(x: n.midX - n.width * 0.25, y: n.minY - 12, width: n.width * 0.5, height: 14))
         body.move(response: 0.6, damping: 0.78); body.resize(response: 0.5, damping: 0.68)
@@ -700,13 +735,13 @@ final class PiPController {
         phase = .idle
         window?.orderOut(nil)
         window?.alphaValue = 1
-        hideOverlay()
+        attach.snap(0)
         model.video.release("pip")
         haptic(.levelChange)
-        // A gulp: the notch swells once and settles with a wobble.
-        grab.tune(response: 0.36, damping: 0.32)
+        // A gulp: the notch's drop swells once and settles with a wobble.
+        grab.tune(response: 0.38, damping: 0.3)
         grab.target = 0
-        grab.v = 4
+        grab.v = 6
     }
 
     // MARK: Frame loop
@@ -787,39 +822,50 @@ final class PiPController {
             break
         }
 
-        // The overlay draws the water only while it's attached to something; otherwise the real
-        // window shows itself.
-        let liquid = phase == .pulling || phase == .landing || phase == .returning || phase == .merging || attach.x > 0.01
+        // The overlay draws the water only while it's attached to something (or the notch is still
+        // wobbling from a gulp); otherwise the real window shows itself.
+        let gulping = phase == .idle && (abs(grab.x) > 0.01 || !grab.settled)
+        let liquid = phase == .pulling || phase == .landing || phase == .returning || phase == .merging
+            || attach.x > 0.01 || gulping
         if phase == .dragging || phase == .settling { setWindowHidden(liquid) }
         if liquid { if overlay?.isVisible != true { showOverlay(); window?.orderFrontRegardless() } }
         else if overlay?.isVisible == true { hideOverlay() }
 
-        pushGrab()
-        if liquid { render() }
+        if liquid { render(showsBody: !gulping) }
 
         let idle = (phase == .idle || phase == .floating) && grab.settled && abs(grab.x) < 0.005
-        if idle { grab.snap(0); pushGrab(); stopTimer() }
+        if idle { grab.snap(0); if overlay?.isVisible == true { hideOverlay() }; stopTimer() }
     }
 
-    /// The notch itself stretches and leans toward the window it's reaching for.
-    private func pushGrab() {
-        let g = max(-0.3, min(1.3, grab.x))
-        var lean: CGFloat = 0
-        if phase == .dragging || phase == .settling || phase == .merging {
-            let n = notchRect
-            let c = body.center
-            lean = max(-0.6, min(0.6, (c.x - n.midX) / max(80, n.minY - c.y + 80)))
-        }
-        var t = Transaction(); t.disablesAnimations = true
-        withTransaction(t) {
-            if abs(model.ui.grab - g) > 0.001 { model.ui.grab = g }
-            if abs(model.ui.grabLean - lean) > 0.001 { model.ui.grabLean = lean }
+    /// Whether the notch's own drop is part of the water right now.
+    private var notchInvolved: Bool {
+        switch phase {
+        case .dragging, .settling, .merging, .idle: return true
+        case .landing: return fromNotch
+        default: return false
         }
     }
 
-    private func render() {
+    private func render(showsBody: Bool = true) {
         var f = GooFrame()
         f.visible = true
+        f.showsBody = showsBody
+        if notchInvolved {
+            let n = notchRect
+            let top = body.rect.maxY
+            // The two drops reach for a meeting point halfway between them; once the window is up at
+            // the notch, it's the notch's mouth.
+            if top < n.minY - 4 {
+                anchor = CGPoint(x: n.midX + (body.cx.x - n.midX) * 0.5, y: (n.minY + top) / 2)
+            } else {
+                anchor = notchMouth
+            }
+            // The notch's drop: the notch itself, swelling as it reaches (and gulps).
+            let g = max(-0.3, min(1.3, grab.x))
+            let drop = CGRect(x: n.minX - 10 * g, y: n.minY - 12 * g, width: n.width + 20 * g, height: n.height + 40 + 12 * g)
+            f.notch = local(drop)
+            f.notchRadius = 12
+        }
         f.body = local(body.rect)
         f.radius = radius.x
         f.anchor = local(anchor)

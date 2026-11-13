@@ -62,9 +62,6 @@ final class NotchUI {
     }
     /// The player's art has been grabbed and is being pulled out as picture in picture.
     var artLifted = false
-    /// How hard the closed notch is reaching for the picture-in-picture window (0…1+), and which way.
-    var grab: CGFloat = 0
-    var grabLean: CGFloat = 0
     /// The enlarged view shows a browser's video rather than album art (no lyrics beside it).
     var bigVideo = false
     /// The lock screen's enlarged album-art view.
