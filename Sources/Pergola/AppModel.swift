@@ -201,6 +201,7 @@ final class AppModel {
         // After the notch has had its first layout: changing its content while the window is still being
         // set up makes AppKit throw.
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in self?.activities.restore() }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in self?.liquid.startDemoIfAsked() }
         ui.trayIsEmpty = { [weak self] in self?.tray.items.isEmpty ?? true }
         api.setEnabled(Prefs.d.bool(forKey: Prefs.activitiesEnabled))
         sensory.start()

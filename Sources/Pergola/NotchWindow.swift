@@ -181,7 +181,7 @@ final class NotchWindowController {
             if keyboardPinned, onScreen, expandedHotRect.contains(mouse) { keyboardPinned = false }
             let keepOpen = (onScreen && expandedHotRect.contains(mouse)) || openMenus > 0 || pressBeganInside || keyboardPinned
                 // Dragging files, it stays open over a wide area around it (and below it, where it reaches out).
-                || (draggingFiles && expandedHotRect.insetBy(dx: -160, dy: -40).union(expandedHotRect.offsetBy(dx: 0, dy: -260)).contains(mouse))
+                || (draggingFiles && expandedHotRect.insetBy(dx: -260, dy: -260).contains(mouse))
             if keepOpen {
                 leaveStart = nil
             } else {
