@@ -173,46 +173,18 @@ final class Goo {
     var frame = GooFrame()
 }
 
-/// Clear water: no frosting, no blur, the tray and desktop show straight through. What makes it read
-/// as water is light: a bright rim that's strongest on top, a soft glint, and a faint shadow edge
-/// underneath. The drop and the notch's bulge are one path, so where they meet there's no seam.
-struct GooView: View {
+/// The water, drawn inside the notch's own window with the same clear Liquid Glass as the notch: the
+/// drop and the notch's edge pouring toward it are one glass shape, continuous with the notch itself.
+struct TrayLiquidView: View {
     let goo: Goo
 
     var body: some View {
         let f = goo.frame
         ZStack(alignment: .topLeading) {
             if f.visible {
-                let water = WaterPath(frame: f)
-                ZStack {
-                    water.fill(.white.opacity(0.06))
-                    // Rim light: bright along the top, fading down the sides.
-                    water.stroke(LinearGradient(colors: [.white.opacity(0.75), .white.opacity(0.18), .white.opacity(0.35)],
-                                                startPoint: .top, endPoint: .bottom), lineWidth: 1.3)
-                    // A faint darker edge just inside, so it reads against light backgrounds too.
-                    water.stroke(.black.opacity(0.18), lineWidth: 3).blur(radius: 1.5).mask(water)
-                    if let b = f.body {
-                        // The glint.
-                        Ellipse()
-                            .fill(LinearGradient(colors: [.white.opacity(0.55), .white.opacity(0)], startPoint: .top, endPoint: .bottom))
-                            .frame(width: b.width * 0.45, height: b.height * 0.2)
-                            .position(x: b.minX + b.width * 0.36, y: b.minY + b.height * 0.17)
-                            .blur(radius: 1)
-                    }
-                }
-                .compositingGroup()
-                // No rim along the notch's own edge, where the bulge joins it.
-                .mask {
-                    if let n = f.notch {
-                        VStack(spacing: 0) {
-                            Color.clear.frame(height: max(0, n.maxY + 1))
-                            LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom).frame(height: 7)
-                            Color.black
-                        }
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                    } else { Color.black }
-                }
-
+                Color.clear
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .glassEffect(.clear, in: WaterPath(frame: f))
                 if let b = f.iconFrame, let icon = f.icon {
                     let side = min(b.width / max(f.squash.width, 0.01), b.height / max(f.squash.height, 0.01)) * 0.68
                     Image(nsImage: icon)
@@ -251,10 +223,6 @@ struct WaterPath: Shape {
     }
 }
 
-final class GooPanel: NSPanel {
-    override var canBecomeKey: Bool { false }
-}
-
 // MARK: - Controller
 
 /// The file tray's water. Everything comes out of (and goes back into) the *open* notch's bottom edge.
@@ -268,7 +236,6 @@ final class GooPanel: NSPanel {
 final class LiquidTray {
     private unowned let model: AppModel
     let goo = Goo()
-    private var overlay: GooPanel?
     private var timer: Timer?
 
     private enum Phase { case idle, pulling, flying, returning, popping, reaching, gulping }
@@ -290,7 +257,8 @@ final class LiquidTray {
 
     private static let breakDistance: CGFloat = 70
     private static let dropSize: CGFloat = 62
-    private static let level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.mainMenuWindow)) + 4)
+    /// How far below the open notch the notch's window reaches, for the water.
+    static let roomBelow: CGFloat = 300
 
     init(model: AppModel) { self.model = model }
 
@@ -306,12 +274,13 @@ final class LiquidTray {
         return CGRect(x: s.midX - e.width / 2, y: s.maxY - e.height, width: e.width, height: e.height)
     }
 
+    /// Screen rect → the notch window's own coordinates (top-left origin).
     private func local(_ r: CGRect) -> CGRect {
-        let f = overlay?.frame ?? screen.frame
+        let f = model.ui.panelFrame
         return CGRect(x: r.minX - f.minX, y: f.maxY - r.maxY, width: r.width, height: r.height)
     }
     private func local(_ p: CGPoint) -> CGPoint {
-        let f = overlay?.frame ?? screen.frame
+        let f = model.ui.panelFrame
         return CGPoint(x: p.x - f.minX, y: f.maxY - p.y)
     }
 
@@ -502,7 +471,6 @@ final class LiquidTray {
         }
         if done || (!model.ui.expanded && phase != .pulling && phase != .popping) {
             phase = .idle
-            overlay?.orderOut(nil)
             goo.frame = GooFrame()
             timer?.invalidate(); timer = nil
             return
@@ -541,28 +509,5 @@ final class LiquidTray {
         goo.frame = f
     }
 
-    // MARK: Overlay window
-
-    private func showOverlay() {
-        let o: GooPanel
-        if let overlay { o = overlay } else {
-            o = GooPanel(contentRect: screen.frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
-            o.backgroundColor = .clear
-            o.isOpaque = false
-            o.hasShadow = false
-            o.ignoresMouseEvents = true
-            o.hidesOnDeactivate = false
-            o.level = Self.level
-            o.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
-            o.contentView = NSHostingView(rootView: GooView(goo: goo))
-            overlay = o
-            o.setFrame(screen.frame, display: false)
-            o.orderFrontRegardless()
-            // The notch lives in its own space above the desktops; join it there, above it.
-            SkyLight.move(o, toLevel: SkyLight.aboveDesktopsLevel)
-        }
-        o.setFrame(screen.frame, display: false)
-        o.sharingType = Prefs.d.bool(forKey: Prefs.hideFromCapture) ? .none : .readOnly
-        o.orderFrontRegardless()
-    }
+    private func showOverlay() {}
 }

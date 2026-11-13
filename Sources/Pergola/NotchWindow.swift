@@ -104,7 +104,8 @@ final class NotchWindowController {
 
     private var canvasSize: CGSize {
         let e = ui.maxExpandedSize
-        return CGSize(width: e.width + 2 * NotchMetrics.flare + 40, height: e.height + 30)
+        // Extra room below for the file tray's water, which pours out of the open notch's edge.
+        return CGSize(width: e.width + 2 * NotchMetrics.flare + 40, height: e.height + 30 + LiquidTray.roomBelow)
     }
 
     private func layout() {

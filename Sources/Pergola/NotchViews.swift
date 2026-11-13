@@ -123,6 +123,8 @@ struct NotchRootView: View {
         }
         .opacity(ui.hidden ? 0 : 1)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        // The file tray's water: the notch's own glass, pouring out of its edge.
+        .overlay(alignment: .topLeading) { TrayLiquidView(goo: model.liquid.goo) }
         .environment(\.colorScheme, .dark)
     }
 
