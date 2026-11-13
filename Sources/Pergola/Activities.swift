@@ -486,17 +486,57 @@ struct GoalRings: View {
     }
 }
 
-private struct Spinner: View {
+/// A turning arc. Turned by Core Animation in the window server, so a task can spin for hours
+/// without Pergola redrawing anything (SwiftUI's repeating animation redrew it every frame).
+private struct Spinner: NSViewRepresentable {
     var tint: Color
     var lineWidth: CGFloat
-    @State private var turning = false
 
-    var body: some View {
-        Circle().trim(from: 0, to: 0.3)
-            .stroke(tint, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
-            .rotationEffect(.degrees(turning ? 360 : 0))
-            .animation(.linear(duration: 0.9).repeatForever(autoreverses: false), value: turning)
-            .onAppear { turning = true }
+    func makeNSView(context: Context) -> SpinnerView { SpinnerView() }
+    func updateNSView(_ view: SpinnerView, context: Context) {
+        view.set(color: NSColor(tint).cgColor, lineWidth: lineWidth)
+    }
+}
+
+final class SpinnerView: NSView {
+    private let arc = CAShapeLayer()
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        arc.fillColor = nil
+        arc.lineCap = .round
+        arc.strokeEnd = 0.3
+        layer?.addSublayer(arc)
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    func set(color: CGColor, lineWidth: CGFloat) {
+        arc.strokeColor = color
+        if arc.lineWidth != lineWidth { arc.lineWidth = lineWidth; needsLayout = true }
+    }
+
+    override func layout() {
+        super.layout()
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        arc.bounds = bounds
+        arc.position = CGPoint(x: bounds.midX, y: bounds.midY)
+        let inset = arc.lineWidth / 2
+        arc.path = CGPath(ellipseIn: bounds.insetBy(dx: inset, dy: inset), transform: nil)
+        CATransaction.commit()
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard window != nil, arc.animation(forKey: "turn") == nil else { return }
+        let turn = CABasicAnimation(keyPath: "transform.rotation.z")
+        turn.fromValue = 0
+        turn.toValue = -2 * Double.pi // clockwise
+        turn.duration = 0.9
+        turn.repeatCount = .infinity
+        turn.isRemovedOnCompletion = false
+        arc.add(turn, forKey: "turn")
     }
 }
 

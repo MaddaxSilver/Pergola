@@ -104,7 +104,7 @@ struct TrayView: View {
                             .font(.system(size: 11, weight: .medium))
                             .foregroundStyle(.white.opacity(0.5))
                         Spacer()
-                        Button("Clear") { withAnimation { tray.clear() } }
+                        Button("Clear") { model.popOutOfTray(tray.items) }
                             .buttonStyle(.plain)
                             .font(.system(size: 11, weight: .medium))
                             .foregroundStyle(.white.opacity(0.6))
@@ -113,10 +113,12 @@ struct TrayView: View {
                         HStack(spacing: 6) {
                             ForEach(tray.items) { item in
                                 TrayTile(item: item)
-                                    .transition(.scale.combined(with: .opacity))
+                                    // Leaving, the tile only fades: its icon goes in the pop drawn over it.
+                                    .transition(.asymmetric(insertion: .scale.combined(with: .opacity),
+                                                            removal: .opacity.animation(.easeOut(duration: 0.12))))
                             }
                             if compact {
-                                Button { withAnimation { tray.clear() } } label: {
+                                Button { model.popOutOfTray(tray.items) } label: {
                                     Image(systemName: "xmark.circle.fill")
                                         .font(.system(size: 15))
                                         .foregroundStyle(.white.opacity(0.45))
@@ -163,7 +165,7 @@ struct TrayTile: View {
         .background(RoundedRectangle(cornerRadius: 8).fill(.white.opacity(hovering ? 0.1 : 0)))
         .overlay(alignment: .topTrailing) {
             if hovering {
-                Button { withAnimation { model.tray.remove(item) } } label: {
+                Button { model.popOutOfTray([item]) } label: {
                     Image(systemName: "xmark.circle.fill")
                         .symbolRenderingMode(.palette)
                         .foregroundStyle(.white, .gray)
@@ -175,7 +177,11 @@ struct TrayTile: View {
         }
         .opacity(model.ui.liftedTrayItem == item.id ? 0.25 : 1)
         .onHover { hovering = $0 }
-        .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame = $0 }
+        .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: {
+            frame = $0
+            model.trayPops.iconRects[item.id] = CGRect(x: $0.midX - 20, y: $0.minY + 4, width: 40, height: 40)
+        }
+        .onDisappear { model.trayPops.iconRects[item.id] = nil }
         .onDrag {
             guard let url else { return NSItemProvider() }
             // The file leaves as a drop of water drawn by Pergola, so the system's drag picture is hidden.
@@ -191,7 +197,7 @@ struct TrayTile: View {
             Button("Open") { if let url { NSWorkspace.shared.open(url) } }
             Button("Show in Finder") { if let url { NSWorkspace.shared.activateFileViewerSelecting([url]) } }
             Divider()
-            Button("Remove from Tray") { model.tray.remove(item) }
+            Button("Remove from Tray") { model.popOutOfTray([item]) }
         }
         .help(url?.path ?? item.name)
     }

@@ -136,6 +136,18 @@ final class AppModel {
     let activities = Activities()
     @ObservationIgnored private(set) lazy var liquid = LiquidTray(model: self)
     let dragGhost = DragGhost()
+    let trayPops = TrayPops()
+
+    /// Takes files out of the tray: each pops in a bubble of glass (one after another, for several).
+    func popOutOfTray(_ items: [TrayItem]) {
+        for (i, item) in items.prefix(12).enumerated() { trayPops.pop(item, delay: Double(i) * 0.06) }
+        if Prefs.d.bool(forKey: Prefs.haptics) {
+            NSHapticFeedbackManager.defaultPerformer.perform(.generic, performanceTime: .now)
+        }
+        withAnimation(.spring(duration: 0.4, bounce: 0.2)) {
+            for item in items { tray.remove(item) }
+        }
+    }
     @ObservationIgnored private(set) lazy var api = PergolaAPI(activities: activities)
     @ObservationIgnored private lazy var live = LiveWatcher(activities: activities)
 
@@ -203,6 +215,19 @@ final class AppModel {
         // set up makes AppKit throw.
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in self?.activities.restore() }
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in self?.liquid.startDemoIfAsked() }
+        // PERGOLA_POP_DEMO=1: the first file in the tray pops every two seconds (without being removed).
+        if ProcessInfo.processInfo.environment["PERGOLA_POP_DEMO"] != nil {
+            Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    if let first = self.tray.items.first { self.trayPops.pop(first); return }
+                    // An empty tray: a stand-in file in the middle of the drop zone.
+                    let w = self.ui.panelFrame.width, h = self.ui.expandedSize.height
+                    self.trayPops.pop(icon: NSWorkspace.shared.icon(forFile: "/System/Applications/Notes.app"),
+                                      rect: CGRect(x: w / 2 - 20, y: h - 70, width: 40, height: 40))
+                }
+            }
+        }
         ui.trayIsEmpty = { [weak self] in self?.tray.items.isEmpty ?? true }
         api.setEnabled(Prefs.d.bool(forKey: Prefs.activitiesEnabled))
         sensory.start()

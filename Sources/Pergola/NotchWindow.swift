@@ -62,13 +62,7 @@ final class NotchWindowController {
         SkyLight.move(panel, toLevel: SkyLight.aboveDesktopsLevel)
         Log.notch.info("panel frame \(NSStringFromRect(self.panel.frame), privacy: .public) notch \(NSStringFromSize(self.ui.notchSize), privacy: .public)")
 
-        // 120 Hz hover polling: the notch reacts within a frame of the pointer arriving.
-        let t = Timer(timeInterval: 1.0 / 120.0, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.tick() }
-        }
-        t.tolerance = 0
-        RunLoop.main.add(t, forMode: .common)
-        timer = t
+        startTicking(fast: true)
         idleDragCount = dragPasteboard.changeCount
         // Menus opened from the notch (output picker, tray right-click) keep it open while they show.
         NotificationCenter.default.addObserver(forName: NSMenu.didBeginTrackingNotification, object: nil, queue: .main) { [weak self] _ in
@@ -99,8 +93,13 @@ final class NotchWindowController {
 
     // MARK: Geometry
 
+    /// Looked up once, and again whenever displays change (it was being asked for many times a frame).
+    private var cachedScreen: NSScreen?
     private var screen: NSScreen {
-        NSScreen.screens.first(where: { $0.safeAreaInsets.top > 0 }) ?? NSScreen.main ?? NSScreen.screens[0]
+        if let cachedScreen { return cachedScreen }
+        let s = NSScreen.screens.first(where: { $0.safeAreaInsets.top > 0 }) ?? NSScreen.main ?? NSScreen.screens[0]
+        cachedScreen = s
+        return s
     }
 
     private var canvasSize: CGSize {
@@ -110,6 +109,7 @@ final class NotchWindowController {
     }
 
     private func layout() {
+        cachedScreen = nil
         let s = screen
         if s.safeAreaInsets.top > 0, let l = s.auxiliaryTopLeftArea, let r = s.auxiliaryTopRightArea {
             ui.notchSize = CGSize(width: s.frame.width - l.width - r.width, height: s.safeAreaInsets.top)
@@ -144,7 +144,33 @@ final class NotchWindowController {
 
     private let debugPinned = ProcessInfo.processInfo.environment["PERGOLA_PIN_EXPANDED"] != nil
 
+    /// Polling the pointer 120 times a second only while it matters: near or on the notch, while it's
+    /// open, or while a button is held (a drag may be on its way). Otherwise 15 times a second, which
+    /// is plenty to notice the pointer heading for the notch.
+    private var ticking = (fast: false, started: false)
+
+    private func startTicking(fast: Bool) {
+        guard !ticking.started || ticking.fast != fast else { return }
+        ticking = (fast, true)
+        timer?.invalidate()
+        let t = Timer(timeInterval: fast ? 1.0 / 120.0 : 1.0 / 15.0, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.tick() }
+        }
+        t.tolerance = fast ? 0 : 0.01
+        RunLoop.main.add(t, forMode: .common)
+        timer = t
+    }
+
+    private func pace() {
+        let mouse = NSEvent.mouseLocation
+        let near = collapsedHotRect.insetBy(dx: -160, dy: -120).contains(mouse)
+        let busy = ui.expanded || ui.hovering || near || draggingFiles || hoverStart != nil || leaveStart != nil
+            || NSEvent.pressedMouseButtons != 0 || debugPinned
+        startTicking(fast: busy)
+    }
+
     private func tick() {
+        defer { pace() }
         if debugPinned {
             if let t = ProcessInfo.processInfo.environment["PERGOLA_TAB"].flatMap(NotchTab.init(rawValue:)) { ui.tab = t }
             if let big = ProcessInfo.processInfo.environment["PERGOLA_BIGART"], !ui.bigArt {
@@ -494,7 +520,7 @@ final class DragCatcher {
     }
 
     func stop() {
-        window?.orderOut(nil)
+        if let window, window.isVisible { window.orderOut(nil) }
         if !model.dragGhost.parts.isEmpty { model.dragGhost.parts = [] }
     }
 

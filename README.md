@@ -15,7 +15,7 @@ build it yourself.
 - **Calendar**: a week strip you can tap through, with each day's events and a Join button for
   Zoom, Meet, Teams, Webex and FaceTime links.
 - **Weather**: current conditions and the next hours, from your location or a city you type.
-- **Files tray**: drag files onto the notch to park them, drag them back out later. A file dragged out
+- **Files tray**: drag files onto the notch to park them, drag them back out later; a removed file pops in a bubble of glass. A file dragged out
   of the open notch clings to it as Liquid Glass, stretches, lets go and pops.
 - **Live activities**: any app, script or AI agent on your Mac can show a task and its progress.
   Claude Code, ChatGPT / Codex, Gemini, Cursor and others each get their own mark. Click a task to
@@ -98,6 +98,7 @@ off in Settings › Integrations.
 | `PERGOLA_PEEK=volume|brightness|focus|output|airpods|charging|vpn|hotspot|coin` | Show that overlay for 60 s |
 | `PERGOLA_LOCK_PREVIEW=1` | Show the lock-screen layout over the desktop |
 | `PERGOLA_SETTINGS_PAGE=<page>` | Open Settings on a page |
+| `PERGOLA_POP_DEMO=1` | With the Files page open, the first file pops every two seconds (it stays in the tray) |
 | `PERGOLA_STRESS=<cycles>` | Run the animation stress test that many times and print frame timings |
 
 Launch with `open -n --env NAME=value build/Pergola.app` (launching the binary directly from a
