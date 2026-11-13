@@ -264,29 +264,80 @@ struct BigArtView: View {
     private var ui: NotchUI { model.ui }
 
     var body: some View {
-        let showLyrics = ui.bigArtLyrics && !ui.bigVideo
-        HStack(alignment: .center, spacing: showLyrics ? 22 : 0) {
+        if ui.bigVideo { videoLayout } else { artLayout }
+    }
+
+    /// A browser's video, playing right in the notch: the picture centred and as big as fits, with
+    /// the title and two small glass buttons in one tidy row beneath it.
+    private var videoLayout: some View {
+        VStack(spacing: 10) {
+            VideoCard(cornerRadius: 16)
+                .overlay {
+                    if model.video.status != .live || !model.video.hasFrame, player.artwork == nil {
+                        Image(systemName: "play.rectangle.fill")
+                            .font(.system(size: 34))
+                            .foregroundStyle(.white.opacity(0.25))
+                    }
+                }
+                .frame(width: 344, height: 194)
+                .background(ArtGlow(color: player.accent, radius: 16, blur: 26, y: 10, opacity: 0.4))
+                .liftable(radius: 16)
+                .onTapGesture { player.playPause() }
+                .onAppear { model.video.want("notch", bundleID: player.webBundleID) }
+                .onDisappear { model.video.release("notch") }
+            HStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 1) {
+                    MarqueeText(text: player.title, alignment: .leading)
+                        .font(.system(size: 13.5, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(height: 18)
+                    Text(videoHint ?? player.artist)
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(videoHint == nil ? .white.opacity(0.6) : .orange.opacity(0.9))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                }
+                Spacer(minLength: 4)
+                GlassEffectContainer(spacing: 6) {
+                    HStack(spacing: 6) {
+                        glassButton("pip.enter", help: "Picture in Picture") { model.pip.popOut() }
+                        glassButton("arrow.down.right.and.arrow.up.left", help: "Back to the player") {
+                            withAnimation(Motion.collapse) { model.ui.bigArt = false }
+                        }
+                    }
+                }
+            }
+            .frame(width: 344)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
+    private func glassButton(_ symbol: String, help: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.9))
+                .frame(width: 30, height: 30)
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .glassEffect(.clear.interactive(), in: Circle())
+        .help(help)
+    }
+
+    private var artLayout: some View {
+        let showLyrics = ui.bigArtLyrics
+        return HStack(alignment: .center, spacing: showLyrics ? 22 : 0) {
             sideControls
             if !showLyrics { Spacer(minLength: 0) }
             VStack(spacing: 10) {
-                if ui.bigVideo {
-                    // A browser's video plays right here in the notch.
-                    VideoCard(cornerRadius: 16)
-                        .frame(width: 320, height: 180)
-                        .background(ArtGlow(color: player.accent, radius: 16, blur: 26, y: 10, opacity: 0.4))
-                        .liftable(radius: 16)
-                        .onTapGesture { player.playPause() }
-                        .onAppear { model.video.want("notch", bundleID: player.webBundleID) }
-                        .onDisappear { model.video.release("notch") }
-                } else {
-                    ArtworkView(image: player.artwork, cornerRadius: 18)
-                        .frame(width: 200, height: 200)
-                        .background(ArtGlow(color: player.accent, radius: 18, blur: 26, y: 10, opacity: 0.5))
-                        .scaleEffect(player.isPlaying ? 1 : 0.92)
-                        .animation(.spring(duration: 0.5, bounce: 0.3), value: player.isPlaying)
-                        .liftable(radius: 18)
-                        .onTapGesture { player.playPause() }
-                }
+                ArtworkView(image: player.artwork, cornerRadius: 18)
+                    .frame(width: 200, height: 200)
+                    .background(ArtGlow(color: player.accent, radius: 18, blur: 26, y: 10, opacity: 0.5))
+                    .scaleEffect(player.isPlaying ? 1 : 0.92)
+                    .animation(.spring(duration: 0.5, bounce: 0.3), value: player.isPlaying)
+                    .liftable(radius: 18)
+                    .onTapGesture { player.playPause() }
                 VStack(spacing: 1) {
                     MarqueeText(text: player.title, alignment: .center)
                         .font(.system(size: 14, weight: .semibold))
@@ -298,7 +349,7 @@ struct BigArtView: View {
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
                 }
-                .frame(width: ui.bigVideo ? 320 : 200)
+                .frame(width: 200)
             }
             if showLyrics {
                 lyrics
@@ -316,10 +367,9 @@ struct BigArtView: View {
     /// Why the video can't be shown, when that's something you can fix.
     private var videoHint: String? {
         guard ui.bigVideo else { return nil }
-        let safari = player.webBundleID?.hasPrefix("com.apple.Safari") ?? true
         switch model.video.status {
-        case .noJavaScript: return safari ? "Turn on Allow JavaScript from Apple Events in Safari's Developer settings"
-                                          : "Turn on View › Developer › Allow JavaScript from Apple Events"
+        case .noExtension: return "Turn on the Pergola extension in Safari's Extensions settings to see the video"
+        case .noJavaScript: return "Turn on View › Developer › Allow JavaScript from Apple Events"
         case .noPermission: return "Allow Pergola in Screen Recording to show the video"
         case .protected: return "This video is protected and can't be shown here"
         default: return nil

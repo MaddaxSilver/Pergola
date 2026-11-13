@@ -68,6 +68,8 @@ struct NotchRootView: View {
         if model.showsWings { w += 2 * model.closedWingWidth }
         if drop { h += NotchUI.dropHeight } // straight down: an overlay never makes the notch wider
         if ui.hovering { w += 10; h += 3 } // a small lift before it opens
+        // Reaching for the picture-in-picture window: the whole notch stretches toward it.
+        if ui.grab != 0 { w += 26 * ui.grab; h += 30 * ui.grab }
         return CGSize(width: w, height: h)
     }
 
@@ -123,6 +125,8 @@ struct NotchRootView: View {
         }
         .opacity(ui.hidden ? 0 : 1)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        // …and leans its way: the top stays on the hardware notch while the bottom swings over.
+        .transformEffect(CGAffineTransform(a: 1, b: 0, c: ui.expanded ? 0 : ui.grabLean * max(0, ui.grab) * 0.8, d: 1, tx: 0, ty: 0))
         .environment(\.colorScheme, .dark)
     }
 

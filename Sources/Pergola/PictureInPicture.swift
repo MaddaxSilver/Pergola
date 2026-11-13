@@ -4,8 +4,8 @@ import AppKit
 // MARK: - Springs
 
 /// One value pulled toward a target by a damped spring, stepped by hand every frame. Hand-stepped
-/// springs keep their velocity when the target moves mid-flight, which is what makes the liquid
-/// feel continuous (SwiftUI animations can't drive a Canvas).
+/// springs keep their velocity when the target moves mid-flight, which is what makes the water
+/// feel continuous: it carries momentum, overshoots and wobbles like the real thing.
 struct Springy {
     var x: CGFloat
     var v: CGFloat = 0
@@ -13,7 +13,9 @@ struct Springy {
     private var k: CGFloat = 0
     private var c: CGFloat = 0
 
-    init(_ x: CGFloat) { self.x = x; target = x; tune(response: 0.4, damping: 0.8) }
+    init(_ x: CGFloat, response: CGFloat = 0.4, damping: CGFloat = 0.8) {
+        self.x = x; target = x; tune(response: response, damping: damping)
+    }
 
     /// `response` is roughly the period in seconds; `damping` 1 = no overshoot, lower = wobble.
     mutating func tune(response: CGFloat, damping: CGFloat) {
@@ -24,53 +26,71 @@ struct Springy {
     mutating func snap(_ value: CGFloat) { x = value; target = value; v = 0 }
 
     mutating func step(_ dt: CGFloat) {
-        let a = -k * (x - target) - c * v
-        v += a * dt
-        x += v * dt
+        // Two half steps: stays stable with the stiff springs used for following the pointer.
+        for _ in 0..<2 {
+            let h = dt / 2
+            let a = -k * (x - target) - c * v
+            v += a * h
+            x += v * h
+        }
     }
 
-    var settled: Bool { abs(x - target) < 0.4 && abs(v) < 4 }
+    var settled: Bool { abs(x - target) < 0.5 && abs(v) < 6 }
 }
 
-struct SpringRect {
-    var x = Springy(0), y = Springy(0), w = Springy(0), h = Springy(0)
+/// A drop of water: where it is, how big, and how it's squashed or stretched right now.
+struct Drop {
+    var cx = Springy(0), cy = Springy(0), w = Springy(0), h = Springy(0)
+    /// Squash and stretch, 1 = at rest. Lightly damped so a jolt sets it wobbling.
+    var sx = Springy(1, response: 0.3, damping: 0.32), sy = Springy(1, response: 0.3, damping: 0.32)
 
-    var rect: CGRect { CGRect(x: x.x, y: y.x, width: max(0, w.x), height: max(0, h.x)) }
-    var targetRect: CGRect { CGRect(x: x.target, y: y.target, width: w.target, height: h.target) }
+    var rect: CGRect {
+        let W = max(0, w.x * sx.x), H = max(0, h.x * sy.x)
+        return CGRect(x: cx.x - W / 2, y: cy.x - H / 2, width: W, height: H)
+    }
+    var restRect: CGRect { CGRect(x: cx.x - w.x / 2, y: cy.x - h.x / 2, width: w.x, height: h.x) }
+    var center: CGPoint { CGPoint(x: cx.x, y: cy.x) }
+    var velocity: CGPoint { CGPoint(x: cx.v, y: cy.v) }
 
-    mutating func tune(response: CGFloat, damping: CGFloat) {
-        x.tune(response: response, damping: damping); y.tune(response: response, damping: damping)
+    mutating func move(response: CGFloat, damping: CGFloat) {
+        cx.tune(response: response, damping: damping); cy.tune(response: response, damping: damping)
+    }
+    mutating func resize(response: CGFloat, damping: CGFloat) {
         w.tune(response: response, damping: damping); h.tune(response: response, damping: damping)
     }
-    mutating func snap(_ r: CGRect) { x.snap(r.minX); y.snap(r.minY); w.snap(r.width); h.snap(r.height) }
-    mutating func aim(_ r: CGRect) { x.target = r.minX; y.target = r.minY; w.target = r.width; h.target = r.height }
-    mutating func step(_ dt: CGFloat) { x.step(dt); y.step(dt); w.step(dt); h.step(dt) }
-    var settled: Bool { x.settled && y.settled && w.settled && h.settled }
+    mutating func snap(_ r: CGRect) {
+        cx.snap(r.midX); cy.snap(r.midY); w.snap(r.width); h.snap(r.height); sx.snap(1); sy.snap(1)
+    }
+    mutating func aim(center c: CGPoint) { cx.target = c.x; cy.target = c.y }
+    mutating func aim(size s: CGSize) { w.target = s.width; h.target = s.height }
+    mutating func aim(_ r: CGRect) { aim(center: CGPoint(x: r.midX, y: r.midY)); aim(size: r.size) }
+    mutating func step(_ dt: CGFloat) {
+        cx.step(dt); cy.step(dt); w.step(dt); h.step(dt); sx.step(dt); sy.step(dt)
+    }
+    var settled: Bool { cx.settled && cy.settled && w.settled && h.settled }
 }
 
-// MARK: - What the liquid overlay draws
+// MARK: - What the overlay draws
 
-/// One frame of liquid, in the overlay's own coordinates (top-left origin).
+/// One frame of water, in the overlay's own coordinates (top-left origin).
 struct GooFrame {
-    struct Blob { var rect: CGRect; var radius: CGFloat }
-    struct Bridge { var a: CGPoint; var b: CGPoint; var width: CGFloat }
+    struct Blob: Identifiable { var id: String; var rect: CGRect; var radius: CGFloat }
     var blobs: [Blob] = []
-    var bridges: [Bridge] = []
-    /// The moving drop, which carries the picture.
-    var drop: CGRect = .zero
-    var dropRadius: CGFloat = 12
-    var showsContent = false
+    /// The picture the drop carries.
+    var content: CGRect?
+    var contentRadius: CGFloat = 12
     var contentAlpha: Double = 1
 
     var bounds: CGRect? {
         var r: CGRect?
         for b in blobs { r = r?.union(b.rect) ?? b.rect }
-        for b in bridges {
-            let s = CGRect(x: min(b.a.x, b.b.x), y: min(b.a.y, b.b.y), width: abs(b.a.x - b.b.x), height: abs(b.a.y - b.b.y))
-                .insetBy(dx: -b.width, dy: -b.width)
-            r = r?.union(s) ?? s
-        }
-        return r?.insetBy(dx: -30, dy: -30).integral
+        if let c = content { r = r?.union(c) ?? c }
+        guard let r else { return nil }
+        // Rounded out to a coarse grid so the glass layer isn't re-sized on every frame.
+        let g: CGFloat = 48
+        let x0 = floor((r.minX - 40) / g) * g, y0 = floor((r.minY - 40) / g) * g
+        let x1 = ceil((r.maxX + 40) / g) * g, y1 = ceil((r.maxY + 40) / g) * g
+        return CGRect(x: x0, y: y0, width: x1 - x0, height: y1 - y0)
     }
 }
 
@@ -79,8 +99,9 @@ final class Goo {
     var frame = GooFrame()
 }
 
-/// Black liquid, drawn the classic metaball way: blurred shapes cut at half opacity, so anything
-/// close together melts into one smooth drop and thin necks pinch off by themselves.
+/// The water is real Liquid Glass: every drop and every bead of the neck is a glass shape in one
+/// container, so macOS itself melts them together when they're close and lets them part when the
+/// neck gets thin enough, with the lensing and rim light of the rest of the system.
 struct GooView: View {
     @Environment(AppModel.self) private var model
     let goo: Goo
@@ -89,32 +110,31 @@ struct GooView: View {
         let f = goo.frame
         ZStack(alignment: .topLeading) {
             if let box = f.bounds {
-                Canvas { ctx, _ in
-                    ctx.addFilter(.alphaThreshold(min: 0.5, color: .black))
-                    ctx.addFilter(.blur(radius: 9))
-                    ctx.drawLayer { l in
-                        l.translateBy(x: -box.minX, y: -box.minY)
-                        for b in f.blobs {
-                            l.fill(Path(roundedRect: b.rect, cornerRadius: b.radius, style: .continuous), with: .color(.black))
-                        }
-                        for b in f.bridges where b.width > 0.5 {
-                            var p = Path(); p.move(to: b.a); p.addLine(to: b.b)
-                            l.stroke(p, with: .color(.black), style: StrokeStyle(lineWidth: b.width, lineCap: .round))
+                GlassEffectContainer(spacing: 14) {
+                    ZStack(alignment: .topLeading) {
+                        ForEach(f.blobs) { b in
+                            Color.clear
+                                .frame(width: b.rect.width, height: b.rect.height)
+                                .glassEffect(.clear.tint(.white.opacity(0.04)),
+                                             in: RoundedRectangle(cornerRadius: b.radius, style: .continuous))
+                                .offset(x: b.rect.minX - box.minX, y: b.rect.minY - box.minY)
                         }
                     }
+                    .frame(width: box.width, height: box.height, alignment: .topLeading)
                 }
-                .frame(width: box.width, height: box.height)
+                .frame(width: box.width, height: box.height, alignment: .topLeading)
                 .offset(x: box.minX, y: box.minY)
             }
-            if f.showsContent, f.drop.width > 1 {
-                VideoCard(cornerRadius: f.dropRadius)
-                    .frame(width: f.drop.width, height: f.drop.height)
+            if let c = f.content, c.width > 2, c.height > 2 {
+                VideoCard(cornerRadius: f.contentRadius, cheap: true)
+                    .frame(width: c.width, height: c.height)
                     .opacity(f.contentAlpha)
-                    .offset(x: f.drop.minX, y: f.drop.minY)
+                    .offset(x: c.minX, y: c.minY)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .allowsHitTesting(false)
+        .environment(\.colorScheme, .dark)
     }
 }
 
@@ -122,13 +142,21 @@ struct GooView: View {
 struct VideoCard: View {
     @Environment(AppModel.self) private var model
     var cornerRadius: CGFloat
+    /// For views that change size every frame: skips the high-quality artwork resampling.
+    var cheap = false
 
     var body: some View {
         let mirror = model.video
         let live = model.player.source == .web && mirror.hasFrame
         ZStack {
             Color.black
-            ArtworkView(image: model.player.artwork, cornerRadius: 0)
+            if cheap {
+                if let art = model.player.artwork {
+                    Image(nsImage: art).resizable().interpolation(.medium).aspectRatio(contentMode: .fill)
+                }
+            } else {
+                ArtworkView(image: model.player.artwork, cornerRadius: 0)
+            }
             if live { VideoSurface(mirror: mirror).transition(.opacity) }
         }
         .animation(.easeOut(duration: 0.3), value: live)
@@ -155,12 +183,13 @@ final class PiPHostingView: NSHostingView<AnyView> {
 
 // MARK: - Controller
 
-/// Picture in picture you pull out of the notch like a drop of water.
+/// Picture in picture you pull out of the notch like water.
 ///
-///  • Pull the art down: it stretches against the notch with growing resistance, a neck of liquid
-///    holding it back, until it pinches off into a floating video window.
-///  • Drag that window back up: the notch and the window reach for each other and, once released
-///    close enough, it melts back into the notch.
+///  • Pull the art down: it bulges out against surface tension, held by a neck that thins in the
+///    middle like a stretching drop, then pinches off, leaving a tiny satellite droplet. Both drops
+///    wobble as they settle; the freed one swells into a floating video window.
+///  • Drag the window back near the notch: the whole notch stretches toward it while a glass arm
+///    reaches out, and once released close enough the window is drawn in and swallowed.
 @MainActor
 final class PiPController {
     private unowned let model: AppModel
@@ -169,18 +198,25 @@ final class PiPController {
     private var window: PiPPanel?
     private var timer: Timer?
 
-    private enum Phase { case idle, pulling, landing, returning, floating, dragging, merging }
+    private enum Phase { case idle, pulling, landing, returning, floating, dragging, settling, merging }
     private var phase: Phase = .idle
 
-    // Liquid state (screen coordinates).
-    private var home = SpringRect()
+    // Water (screen coordinates).
+    private var home = Drop()
     private var homeShown = false
-    private var drop = SpringRect()
+    private var drop = Drop()
     private var dropRadius = Springy(11)
-    private var bridge = Springy(0)
+    /// 0 = a thick neck, 1 = pinched through in the middle.
+    private var pinch = Springy(0)
+    /// After the neck breaks, its two halves pull back into their drops (0 → 1).
+    private var retract = Springy(0, response: 0.2, damping: 1)
+    private var satellite = Drop()
+    private var satelliteShown = false
     private var contentAlpha = Springy(1)
-    /// Fades the notch↔window tendrils out after a drag that didn't merge.
-    private var reachFade = Springy(0)
+    /// How hard the notch is reaching for the window (also drives the notch's own stretch).
+    private var grab = Springy(0, response: 0.32, damping: 0.4)
+    /// Window position while it glides to rest after a throw.
+    private var winX = Springy(0), winY = Springy(0)
 
     private var artRect = CGRect.zero
     private var artRadius: CGFloat = 11
@@ -188,10 +224,13 @@ final class PiPController {
     private var broken = false
     private var brokeAt = Date.distantPast
     private var landingSince = Date.distantPast
-    private var grab = CGPoint.zero
+    private var grabOffset = CGPoint.zero
+    private var dragSamples: [(t: TimeInterval, p: CGPoint)] = []
+    private var lastTick = CACurrentMediaTime()
 
-    private static let breakDistance: CGFloat = 115
-    private static let reachRadius: CGFloat = 190
+    private static let breakDistance: CGFloat = 130
+    private static let reachRadius: CGFloat = 210
+    private static let rim: CGFloat = 4
     private static let level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.mainMenuWindow)) + 4)
 
     init(model: AppModel) { self.model = model }
@@ -215,27 +254,27 @@ final class PiPController {
     }
 
     private var pipWidth: CGFloat {
-        get { let w = Prefs.d.double(forKey: "pipWidth"); return w > 0 ? w : (aspect > 1.2 ? 340 : 240) }
+        get { let w = Prefs.d.double(forKey: "pipWidth"); return w > 0 ? w : (aspect > 1.2 ? 420 : 260) }
         set { Prefs.d.set(newValue, forKey: "pipWidth") }
     }
 
-    private func pipRect(centeredAt c: CGPoint) -> CGRect {
-        let w = pipWidth, h = (w / aspect).rounded()
-        return CGRect(x: c.x - w / 2, y: c.y - h / 2, width: w, height: h)
+    /// The window's size, glass rim included.
+    private var pipSize: CGSize {
+        let w = pipWidth
+        return CGSize(width: w, height: ((w - 2 * Self.rim) / aspect + 2 * Self.rim).rounded())
     }
 
-    /// Screen rect (bottom-left origin) → overlay rect (top-left origin).
     private func local(_ r: CGRect) -> CGRect {
         let f = overlay?.frame ?? screen.frame
         return CGRect(x: r.minX - f.minX, y: f.maxY - r.maxY, width: r.width, height: r.height)
     }
-    private func local(_ p: CGPoint) -> CGPoint {
-        let f = overlay?.frame ?? screen.frame
-        return CGPoint(x: p.x - f.minX, y: f.maxY - p.y)
-    }
 
     private func wantVideo(_ who: String) {
         if model.player.source == .web { model.video.want(who, bundleID: model.player.webBundleID) }
+    }
+
+    private func haptic(_ p: NSHapticFeedbackManager.FeedbackPattern) {
+        if Prefs.d.bool(forKey: Prefs.haptics) { NSHapticFeedbackManager.defaultPerformer.perform(p, performanceTime: .now) }
     }
 
     // MARK: Pulling out of the notch
@@ -245,100 +284,148 @@ final class PiPController {
         guard phase == .idle, !isOpen, model.player.hasTrack else { return }
         phase = .pulling
         broken = false
+        satelliteShown = false
         self.artRect = artRect
         artRadius = radius
         pullStart = mouse
         wantVideo("pull")
-        withAnimation(.easeOut(duration: 0.12)) { model.ui.artLifted = true }
+        withAnimation(.easeOut(duration: 0.1)) { model.ui.artLifted = true }
         home.snap(artRect); homeShown = true
+        home.move(response: 0.12, damping: 0.85); home.resize(response: 0.12, damping: 0.85)
         drop.snap(artRect)
+        // Stiff enough to feel attached to the finger, soft enough to never step.
+        drop.move(response: 0.085, damping: 0.82); drop.resize(response: 0.1, damping: 0.85)
         dropRadius.snap(radius)
-        bridge.snap(artRect.width * 0.62)
+        pinch.snap(0)
+        retract.snap(0)
         contentAlpha.snap(1)
-        reachFade.snap(0)
+        grab.snap(0)
         showOverlay()
+        startTimer()
         render()
     }
 
-    func pull(to mouse: CGPoint) {
-        guard phase == .pulling else { return }
+    /// Mouse moves are sampled by the frame loop (smoother than gesture events), so this only
+    /// needs to exist for the gesture's sake.
+    func pull(to mouse: CGPoint) {}
+
+    /// Called every frame while pulling.
+    private func pullStep(_ mouse: CGPoint) {
         let dx = mouse.x - pullStart.x, dy = mouse.y - pullStart.y
         let d = hypot(dx, dy)
+        let dir = d > 0.01 ? CGPoint(x: dx / d, y: dy / d) : CGPoint(x: 0, y: -1)
         if !broken {
-            // Rubber-band: the art follows less and less the further you pull.
+            // Surface tension: the further you pull, the less the water follows.
             let t = min(1, d / Self.breakDistance)
-            let shown = 150 * (1 - 1 / (d * 0.95 / 150 + 1))
-            let dir = d > 0 ? CGPoint(x: dx / d, y: dy / d) : .zero
-            let grow = 1 + 0.12 * t
-            let c = CGPoint(x: artRect.midX + dir.x * shown, y: artRect.midY + dir.y * shown)
-            drop.snap(CGRect(x: c.x - artRect.width * grow / 2, y: c.y - artRect.height * grow / 2,
-                             width: artRect.width * grow, height: artRect.height * grow))
-            home.snap(artRect.insetBy(dx: artRect.width * 0.14 * t, dy: artRect.height * 0.14 * t))
-            // The neck thins as it stretches; past the break point it's too thin to hold.
-            bridge.snap(artRect.width * 0.62 * pow(1 - t, 1.2) + 7)
+            let shown = 170 * (1 - 1 / (d * 1.05 / 170 + 1))
+            drop.aim(center: CGPoint(x: artRect.midX + dir.x * shown, y: artRect.midY + dir.y * shown))
+            // Water is conserved: the drop swells as the pool it's leaving shrinks.
+            drop.aim(size: CGSize(width: artRect.width * (1 + 0.1 * t), height: artRect.height * (1 + 0.1 * t)))
+            drop.sx.target = 1 + 0.2 * t * abs(dir.x) - 0.08 * t * abs(dir.y)
+            drop.sy.target = 1 + 0.2 * t * abs(dir.y) - 0.08 * t * abs(dir.x)
+            home.aim(center: CGPoint(x: artRect.midX + dir.x * shown * 0.1, y: artRect.midY + dir.y * shown * 0.1))
+            home.aim(size: CGSize(width: artRect.width * (1 - 0.2 * t), height: artRect.height * (1 - 0.2 * t)))
+            home.sx.target = 1 - 0.06 * t * abs(dir.y); home.sy.target = 1 + 0.1 * t * abs(dir.y)
+            pinch.snap(pow(t, 1.6))
             if d > Self.breakDistance { breakOff(mouse) }
         } else {
-            drop.aim(pipRect(centeredAt: mouse))
+            drop.aim(center: CGPoint(x: mouse.x - grabOffset.x, y: mouse.y - grabOffset.y))
+            stretchWithSpeed()
         }
-        render()
+    }
+
+    /// A moving drop trails into a teardrop: it stretches along its motion and narrows across it.
+    private func stretchWithSpeed() {
+        let v = drop.velocity
+        let s = hypot(v.x, v.y)
+        guard s > 1 else { drop.sx.target = 1; drop.sy.target = 1; return }
+        let e = min(0.1, s / 14000)
+        drop.sx.target = 1 + e * abs(v.x) / s - e * 0.5 * abs(v.y) / s
+        drop.sy.target = 1 + e * abs(v.y) / s - e * 0.5 * abs(v.x) / s
     }
 
     private func breakOff(_ mouse: CGPoint) {
         broken = true
         brokeAt = Date()
-        if Prefs.d.bool(forKey: Prefs.haptics) {
-            NSHapticFeedbackManager.defaultPerformer.perform(.generic, performanceTime: .now)
-        }
-        // The neck snaps, the drop left behind wobbles back into shape…
-        bridge.tune(response: 0.16, damping: 1); bridge.target = 0
-        home.tune(response: 0.32, damping: 0.42); home.aim(artRect)
-        // …and the freed drop leaps to the pointer and swells into the video.
-        drop.tune(response: 0.42, damping: 0.68); drop.aim(pipRect(centeredAt: mouse))
-        dropRadius.tune(response: 0.4, damping: 0.8); dropRadius.target = 14
-        startTimer()
+        haptic(.generic)
+        let size = pipSize
+        // Keep the grip where it was on the art, scaled up to the window.
+        let rel = CGPoint(x: (mouse.x - drop.cx.x) / max(drop.w.x, 1), y: (mouse.y - drop.cy.x) / max(drop.h.x, 1))
+        grabOffset = CGPoint(x: rel.x * size.width * 0.5, y: rel.y * size.height * 0.5)
+        // The neck snaps and both halves spring back into their drops; a little droplet is left
+        // floating where it broke and gets swept up by the drop.
+        let mid = CGPoint(x: (home.cx.x + drop.cx.x) / 2, y: (home.cy.x + drop.cy.x) / 2)
+        satellite.snap(CGRect(x: mid.x - 4, y: mid.y - 4, width: 8, height: 8))
+        satellite.move(response: 0.32, damping: 0.75)
+        satellite.resize(response: 0.3, damping: 1)
+        satelliteShown = true
+        retract.target = 1
+        // The drop left behind recoils and wobbles back to shape.
+        home.aim(artRect)
+        home.move(response: 0.3, damping: 0.5); home.resize(response: 0.3, damping: 0.5)
+        home.sx.target = 1; home.sy.target = 1
+        home.sy.v = 4; home.sx.v = -3
+        // The freed drop swells into the window, wobbling from the snap.
+        drop.move(response: 0.2, damping: 0.68)
+        drop.resize(response: 0.42, damping: 0.62)
+        drop.aim(size: size)
+        drop.sy.v = -5; drop.sx.v = 4
+        dropRadius.tune(response: 0.4, damping: 0.9); dropRadius.target = 18
     }
 
     func endPull() {
         guard phase == .pulling else { return }
         if broken {
+            // Thrown: it carries on a little in the direction it was moving.
+            let v = drop.velocity
+            let size = drop.w.target > 0 ? CGSize(width: drop.w.target, height: drop.h.target) : pipSize
+            var c = CGPoint(x: drop.cx.target + v.x * 0.1, y: drop.cy.target + v.y * 0.1)
+            c = clampCenter(c, size: size)
+            drop.aim(center: c)
+            drop.move(response: 0.34, damping: 0.8)
             phase = .landing
             landingSince = Date()
-            drop.tune(response: 0.3, damping: 0.85)
         } else {
-            // Let go too early: it springs back into the notch with a wobble.
+            // Let go too early: surface tension pulls it back into the pool.
             phase = .returning
-            drop.tune(response: 0.34, damping: 0.5); drop.aim(artRect)
-            home.tune(response: 0.3, damping: 0.6); home.aim(artRect)
-            bridge.tune(response: 0.3, damping: 0.7); bridge.target = artRect.width * 0.62
+            drop.aim(artRect)
+            drop.move(response: 0.3, damping: 0.55); drop.resize(response: 0.3, damping: 0.55)
+            drop.sx.target = 1; drop.sy.target = 1
+            home.aim(artRect); home.sx.target = 1; home.sy.target = 1
+            pinch.tune(response: 0.25, damping: 1); pinch.target = 0
         }
-        startTimer()
     }
 
-    /// Pops the picture out without a drag (button or shortcut): a drop falls out of the notch and
-    /// floats to the top-right corner.
+    private func clampCenter(_ c: CGPoint, size: CGSize) -> CGPoint {
+        let vis = (NSScreen.screens.first { $0.frame.contains(c) } ?? screen).visibleFrame
+        return CGPoint(x: min(max(c.x, vis.minX + size.width / 2 + 12), vis.maxX - size.width / 2 - 12),
+                       y: min(max(c.y, vis.minY + size.height / 2 + 12), vis.maxY - size.height / 2 - 12))
+    }
+
+    /// Pops the picture out without a drag (button): a drop falls out of the notch and glides to
+    /// the top-right corner.
     func popOut() {
         guard phase == .idle, !isOpen, model.player.hasTrack else { return }
         wantVideo("pull")
         let n = notchRect
-        let visible = screen.visibleFrame
-        let size = pipRect(centeredAt: .zero).size
-        let target = CGRect(x: visible.maxX - size.width - 20, y: visible.maxY - size.height - 20,
-                            width: size.width, height: size.height)
+        let size = pipSize
+        let vis = screen.visibleFrame
+        let target = CGPoint(x: vis.maxX - size.width / 2 - 20, y: vis.maxY - size.height / 2 - 20)
         phase = .landing
         broken = true
         brokeAt = .distantPast
         landingSince = Date()
         homeShown = false
-        home.snap(n)
-        drop.snap(CGRect(x: n.midX - 20, y: n.minY - 10, width: 40, height: 30))
-        dropRadius.snap(15)
-        contentAlpha.snap(0)
-        bridge.snap(26)
+        satelliteShown = false
+        home.snap(CGRect(x: n.midX - 20, y: n.minY - 8, width: 40, height: 16))
+        drop.snap(CGRect(x: n.midX - 22, y: n.minY - 30, width: 44, height: 30))
+        drop.move(response: 0.55, damping: 0.72); drop.resize(response: 0.5, damping: 0.65)
+        drop.aim(center: target); drop.aim(size: size)
+        dropRadius.snap(14); dropRadius.target = 18
+        pinch.snap(0.3)
+        retract.snap(0); retract.tune(response: 0.35, damping: 1); retract.target = 1
+        contentAlpha.snap(0); contentAlpha.tune(response: 0.35, damping: 1); contentAlpha.target = 1
         showOverlay()
-        drop.tune(response: 0.55, damping: 0.75); drop.aim(target)
-        dropRadius.tune(response: 0.4, damping: 1); dropRadius.target = 14
-        contentAlpha.tune(response: 0.35, damping: 1); contentAlpha.target = 1
-        bridge.tune(response: 0.3, damping: 1); bridge.target = 0
         startTimer()
         render()
     }
@@ -374,12 +461,13 @@ final class PiPController {
     func close() {
         guard let w = window, w.isVisible else { return }
         NSAnimationContext.runAnimationGroup({ ctx in
-            ctx.duration = 0.18
+            ctx.duration = 0.2
             w.animator().alphaValue = 0
         }, completionHandler: { [weak self] in
             MainActor.assumeIsolated {
                 w.orderOut(nil)
                 self?.phase = .idle
+                self?.model.video.release("pip")
             }
         })
     }
@@ -388,7 +476,7 @@ final class PiPController {
     func fitAspect() {
         guard let w = window, w.isVisible, phase == .floating else { return }
         let f = w.frame
-        let h = (f.width / aspect).rounded()
+        let h = ((f.width - 2 * Self.rim) / aspect + 2 * Self.rim).rounded()
         guard abs(h - f.height) > 1 else { return }
         w.setFrame(CGRect(x: f.minX, y: f.maxY - h, width: f.width, height: h), display: true, animate: true)
         w.invalidateShadow()
@@ -397,85 +485,98 @@ final class PiPController {
     private func resize(by factor: CGFloat) {
         guard let w = window, phase == .floating else { return }
         let f = w.frame
-        let width = min(760, max(200, f.width * factor))
-        let h = (width / aspect).rounded()
+        let width = min(900, max(220, f.width * factor))
+        let h = ((width - 2 * Self.rim) / aspect + 2 * Self.rim).rounded()
         pipWidth = width
         w.setFrame(CGRect(x: f.midX - width / 2, y: f.midY - h / 2, width: width, height: h), display: true)
         w.invalidateShadow()
     }
 
-    // MARK: Dragging it back
+    // MARK: Dragging it around and back
 
     func windowDragChanged() {
         guard let w = window else { return }
         let mouse = NSEvent.mouseLocation
         if phase != .dragging {
-            guard phase == .floating else { return }
+            guard phase == .floating || phase == .settling else { return }
             phase = .dragging
-            grab = CGPoint(x: mouse.x - w.frame.minX, y: mouse.y - w.frame.minY)
+            grabOffset = CGPoint(x: mouse.x - w.frame.minX, y: mouse.y - w.frame.minY)
             w.level = Self.level
+            dragSamples = []
+            grab.tune(response: 0.2, damping: 0.75)
         }
-        var origin = CGPoint(x: mouse.x - grab.x, y: mouse.y - grab.y)
-        // Near the notch, the two reach for each other and the window is drawn in a little.
+        dragSamples.append((CACurrentMediaTime(), mouse))
+        dragSamples = dragSamples.filter { CACurrentMediaTime() - $0.t < 0.1 }
+        var origin = CGPoint(x: mouse.x - grabOffset.x, y: mouse.y - grabOffset.y)
         let size = w.frame.size
+        let u = reach(top: CGPoint(x: origin.x + size.width / 2, y: origin.y + size.height))
+        // Near the notch the window is drawn in a little, as if by surface tension.
         let n = notchRect
-        let top = CGPoint(x: origin.x + size.width / 2, y: origin.y + size.height)
-        let u = reach(from: top, notch: n)
-        origin.x += (n.midX - top.x) * 0.25 * u * u
-        origin.y += (n.minY - top.y) * 0.25 * u * u
+        origin.x += (n.midX - (origin.x + size.width / 2)) * 0.22 * u * u
+        origin.y += (n.minY - (origin.y + size.height)) * 0.22 * u * u
         w.setFrameOrigin(origin)
         drop.snap(CGRect(origin: origin, size: size))
-        dropRadius.snap(14)
-        if u > 0 {
-            reachFade.snap(1)
+        dropRadius.snap(18)
+        grab.target = u
+        if u > 0 || grab.x > 0.01 {
             if overlay?.isVisible != true { showOverlay(); w.orderFrontRegardless() }
-            render()
-        } else if overlay?.isVisible == true {
-            reachFade.snap(0)
-            render()
+            startTimer()
         }
     }
 
     func windowDragEnded() {
         guard phase == .dragging, let w = window else { return }
         let f = w.frame
-        let u = reach(from: CGPoint(x: f.midX, y: f.maxY), notch: notchRect)
-        if u > 0.45 { merge() } else {
-            phase = .floating
-            w.level = .floating
-            // Keep it on screen.
-            let visible = (NSScreen.screens.first { $0.frame.intersects(f) } ?? screen).visibleFrame
-            var o = f.origin
-            o.x = min(max(o.x, visible.minX + 8), visible.maxX - f.width - 8)
-            o.y = min(max(o.y, visible.minY + 8), visible.maxY - f.height - 8)
-            if o != f.origin { w.setFrame(CGRect(origin: o, size: f.size), display: true, animate: true) }
-            reachFade.tune(response: 0.3, damping: 1); reachFade.target = 0
-            startTimer()
+        let u = reach(top: CGPoint(x: f.midX, y: f.maxY))
+        if u > 0.42 { merge(); return }
+        // Thrown windows glide on and come to rest, snapping to an edge they end up near.
+        var v = CGPoint.zero
+        if let a = dragSamples.first, let b = dragSamples.last, b.t - a.t > 0.01 {
+            v = CGPoint(x: (b.p.x - a.p.x) / (b.t - a.t), y: (b.p.y - a.p.y) / (b.t - a.t))
         }
+        var c = CGPoint(x: f.midX + v.x * 0.16, y: f.midY + v.y * 0.16)
+        let vis = (NSScreen.screens.first { $0.frame.contains(c) } ?? NSScreen.screens.first { $0.frame.intersects(f) } ?? screen).visibleFrame
+        let m: CGFloat = 16, snap: CGFloat = 90
+        if c.x - f.width / 2 - vis.minX < snap { c.x = vis.minX + f.width / 2 + m }
+        if vis.maxX - (c.x + f.width / 2) < snap { c.x = vis.maxX - f.width / 2 - m }
+        if c.y - f.height / 2 - vis.minY < snap { c.y = vis.minY + f.height / 2 + m }
+        if vis.maxY - (c.y + f.height / 2) < snap { c.y = vis.maxY - f.height / 2 - m }
+        c = clampCenter(c, size: f.size)
+        winX.snap(f.minX); winY.snap(f.minY)
+        winX.v = v.x; winY.v = v.y
+        winX.tune(response: 0.42, damping: 0.86); winY.tune(response: 0.42, damping: 0.86)
+        winX.target = c.x - f.width / 2; winY.target = c.y - f.height / 2
+        grab.tune(response: 0.3, damping: 0.5); grab.target = 0
+        phase = .settling
+        startTimer()
     }
 
     /// 0 when far from the notch, 1 when touching it.
-    private func reach(from top: CGPoint, notch n: CGRect) -> CGFloat {
+    private func reach(top: CGPoint) -> CGFloat {
+        let n = notchRect
         let d = hypot(top.x - n.midX, top.y - n.minY)
         return max(0, min(1, 1 - d / Self.reachRadius))
     }
 
-    /// Sends the window home: it flies into the notch and is swallowed.
+    /// Sends the window home: it's drawn into the notch and swallowed.
     func merge() {
         guard let w = window, w.isVisible else { return }
         phase = .merging
         showOverlay()
         drop.snap(w.frame)
-        dropRadius.snap(14)
+        dropRadius.snap(18)
         contentAlpha.snap(1)
-        reachFade.snap(1)
         homeShown = false
+        satelliteShown = false
         w.orderOut(nil)
         let n = notchRect
-        let target = CGRect(x: n.midX - n.width * 0.3, y: n.maxY - n.height, width: n.width * 0.6, height: n.height)
-        drop.tune(response: 0.5, damping: 0.86); drop.aim(target)
-        dropRadius.tune(response: 0.4, damping: 1); dropRadius.target = n.height / 2
-        contentAlpha.tune(response: 0.45, damping: 1); contentAlpha.target = 0
+        drop.move(response: 0.46, damping: 0.88)
+        drop.resize(response: 0.42, damping: 0.95)
+        drop.aim(center: CGPoint(x: n.midX, y: n.minY + n.height * 0.35))
+        drop.aim(size: CGSize(width: n.width * 0.45, height: n.height * 0.7))
+        dropRadius.tune(response: 0.4, damping: 1); dropRadius.target = n.height * 0.35
+        contentAlpha.tune(response: 0.32, damping: 1); contentAlpha.target = 0
+        grab.tune(response: 0.25, damping: 0.8); grab.target = 1
         startTimer()
         render()
     }
@@ -484,20 +585,19 @@ final class PiPController {
         phase = .idle
         hideOverlay()
         model.video.release("pip")
-        if Prefs.d.bool(forKey: Prefs.haptics) {
-            NSHapticFeedbackManager.defaultPerformer.perform(.levelChange, performanceTime: .now)
-        }
-        // A little gulp.
-        withAnimation(Motion.hover) { model.ui.hovering = true }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) { [weak self] in
-            withAnimation(Motion.hover) { self?.model.ui.hovering = false }
-        }
+        haptic(.levelChange)
+        // A gulp: the notch swells once and settles with a wobble.
+        grab.tune(response: 0.34, damping: 0.3)
+        grab.target = 0
+        grab.v = 5
+        startTimer()
     }
 
     // MARK: Frame loop
 
     private func startTimer() {
         guard timer == nil else { return }
+        lastTick = CACurrentMediaTime()
         let t = Timer(timeInterval: 1.0 / 120.0, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.tick() }
         }
@@ -509,99 +609,180 @@ final class PiPController {
     private func stopTimer() { timer?.invalidate(); timer = nil }
 
     private func tick() {
-        let dt: CGFloat = 1.0 / 120.0
-        home.step(dt); drop.step(dt); dropRadius.step(dt); bridge.step(dt); contentAlpha.step(dt); reachFade.step(dt)
+        let now = CACurrentMediaTime()
+        let dt = CGFloat(min(1.0 / 30, max(1.0 / 240, now - lastTick)))
+        lastTick = now
+
+        if phase == .pulling { pullStep(NSEvent.mouseLocation) }
+        if phase == .landing { stretchWithSpeed() }
+
+        home.step(dt); drop.step(dt); dropRadius.step(dt); pinch.step(dt); retract.step(dt)
+        satellite.step(dt); contentAlpha.step(dt); grab.step(dt)
+
+        // The droplet left by the break is swept into the drop.
+        if satelliteShown {
+            satellite.aim(center: drop.center)
+            let r = drop.rect
+            if r.insetBy(dx: -6, dy: -6).contains(satellite.center) { satellite.aim(size: .zero) }
+            if satellite.w.x < 0.5, satellite.w.target == 0 { satelliteShown = false }
+        }
+        // Once the drop left behind has settled, the real art takes its place again.
+        if broken, homeShown, Date().timeIntervalSince(brokeAt) > 0.5 {
+            homeShown = false
+            withAnimation(.spring(duration: 0.35, bounce: 0.3)) { model.ui.artLifted = false }
+        }
 
         switch phase {
-        case .pulling:
-            // Once the left-behind drop has settled, the real art takes its place again.
-            if broken, homeShown, Date().timeIntervalSince(brokeAt) > 0.45 {
-                homeShown = false
-                withAnimation(.spring(duration: 0.35, bounce: 0.3)) { model.ui.artLifted = false }
-            }
         case .landing:
-            if homeShown, Date().timeIntervalSince(brokeAt) > 0.45 {
-                homeShown = false
-                withAnimation(.spring(duration: 0.35, bounce: 0.3)) { model.ui.artLifted = false }
-            }
-            if drop.settled || Date().timeIntervalSince(landingSince) > 0.7 {
+            let done = (drop.settled && Date().timeIntervalSince(landingSince) > 0.25) || Date().timeIntervalSince(landingSince) > 0.9
+            if done {
                 if homeShown { homeShown = false; withAnimation(.spring(duration: 0.35, bounce: 0.3)) { model.ui.artLifted = false } }
                 wantVideo("pip")
-                openWindow(at: drop.targetRect.integral)
+                let r = drop.restRect
+                openWindow(at: CGRect(x: r.minX.rounded(), y: r.minY.rounded(), width: drop.w.target.rounded(), height: drop.h.target.rounded()))
                 model.video.release("pull")
-                // Give the window a frame to draw before the liquid copy goes.
+                // Give the window a frame to draw before the water copy goes.
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) { [weak self] in self?.hideOverlay() }
                 stopTimer()
                 return
             }
         case .returning:
-            if drop.settled && bridge.settled {
+            if drop.settled && hypot(drop.cx.x - artRect.midX, drop.cy.x - artRect.midY) < 1 {
                 phase = .idle
                 hideOverlay()
-                withAnimation(.easeOut(duration: 0.1)) { model.ui.artLifted = false }
+                withAnimation(.easeOut(duration: 0.08)) { model.ui.artLifted = false }
                 model.video.release("pull")
                 stopTimer()
                 return
             }
         case .merging:
-            if (drop.settled && contentAlpha.x < 0.05) || drop.rect.height <= model.ui.notchSize.height + 1 && contentAlpha.x < 0.1 {
-                stopTimer()
+            let n = notchRect
+            if hypot(drop.cx.x - n.midX, drop.cy.x - (n.minY + n.height * 0.35)) < 6 || (drop.settled && contentAlpha.x < 0.05) {
                 finishMerge()
+                pushGrab()
                 return
             }
-        case .floating:
-            if reachFade.settled && reachFade.x < 0.02 {
-                hideOverlay(); stopTimer(); return
+        case .settling:
+            winX.step(dt); winY.step(dt)
+            if let w = window { w.setFrameOrigin(CGPoint(x: winX.x, y: winY.x)); drop.snap(w.frame) }
+            if winX.settled && winY.settled && grab.settled && grab.x < 0.01 {
+                phase = .floating
+                window?.level = .floating
+                hideOverlay()
+                pushGrab()
+                stopTimer()
+                return
             }
-        case .idle, .dragging:
-            stopTimer()
-            return
+        case .idle, .floating:
+            if grab.settled && abs(grab.x) < 0.005 {
+                grab.snap(0)
+                pushGrab()
+                if overlay?.isVisible == true, phase != .pulling { hideOverlay() }
+                stopTimer()
+                return
+            }
+        case .pulling, .dragging:
+            break
         }
+        pushGrab()
         render()
     }
 
-    /// Turns the springs into what the overlay draws.
+    /// The notch itself leans and stretches toward the window it's reaching for.
+    private func pushGrab() {
+        let g = max(-0.3, min(1.4, grab.x))
+        var lean: CGFloat = 0
+        if let w = window, phase == .dragging || phase == .settling || phase == .merging {
+            let n = notchRect
+            let top = phase == .merging ? drop.center : CGPoint(x: w.frame.midX, y: w.frame.maxY)
+            lean = max(-0.7, min(0.7, (top.x - n.midX) / max(60, n.minY - top.y + 60)))
+        }
+        var t = Transaction(); t.disablesAnimations = true
+        withTransaction(t) {
+            if abs(model.ui.grab - g) > 0.001 { model.ui.grab = g }
+            if abs(model.ui.grabLean - lean) > 0.001 { model.ui.grabLean = lean }
+        }
+    }
+
+    /// Turns the water into what the overlay draws.
     private func render() {
         var f = GooFrame()
         let d = drop.rect
-        f.drop = local(d)
-        f.dropRadius = dropRadius.x
-        f.contentAlpha = Double(max(0, min(1, contentAlpha.x)))
 
         switch phase {
         case .pulling, .landing, .returning:
-            f.showsContent = true
             if homeShown {
-                f.blobs.append(.init(rect: local(home.rect), radius: artRadius))
+                f.blobs.append(.init(id: "home", rect: local(home.rect), radius: artRadius * home.sx.x))
             }
-            f.blobs.append(.init(rect: local(d).insetBy(dx: 1, dy: 1), radius: dropRadius.x))
-            if bridge.x > 0.5 {
-                let a = CGPoint(x: home.rect.midX, y: home.rect.midY)
-                let b = CGPoint(x: d.midX, y: d.midY)
-                f.bridges.append(.init(a: local(a), b: local(b), width: bridge.x))
+            f.blobs.append(.init(id: "drop", rect: local(d), radius: dropRadius.x))
+            appendNeck(&f, from: homeShown || phase == .landing ? home : nil, to: drop)
+            if satelliteShown {
+                let s = satellite.rect
+                f.blobs.append(.init(id: "satellite", rect: local(s), radius: s.width / 2))
             }
-        case .dragging, .floating, .merging:
-            f.showsContent = phase == .merging
+            let inset = min(Self.rim, d.width * 0.06)
+            f.content = local(d).insetBy(dx: inset, dy: inset)
+            f.contentRadius = max(4, dropRadius.x - inset)
+            f.contentAlpha = Double(max(0, min(1, contentAlpha.x)))
+        case .dragging, .settling, .merging, .floating, .idle:
+            let u = phase == .merging ? 1 : max(0, min(1, grab.x))
+            guard u > 0.01 || phase == .merging else { break }
             let n = notchRect
-            let top = CGPoint(x: d.midX, y: d.maxY)
-            let u = reach(from: top, notch: n) * max(0, min(1, reachFade.x))
-            // The notch itself is one drop (stretched up past the screen edge so only its bottom shows).
-            f.blobs.append(.init(rect: local(n.insetBy(dx: 0, dy: -20)).offsetBy(dx: 0, dy: -10), radius: n.height / 2))
-            f.blobs.append(.init(rect: local(d).insetBy(dx: 2, dy: 2), radius: dropRadius.x))
-            if u > 0 {
-                // Two tendrils reach for each other; close enough, they meet and become one neck.
-                let nb = CGPoint(x: n.midX, y: n.minY)
-                let reachLen = min(1, 0.12 + 0.62 * u)
-                let width = 6 + 26 * u
-                let p1 = CGPoint(x: nb.x + (top.x - nb.x) * reachLen, y: nb.y + (top.y - nb.y) * reachLen)
-                let p2 = CGPoint(x: top.x + (nb.x - top.x) * reachLen, y: top.y + (nb.y - top.y) * reachLen)
-                f.bridges.append(.init(a: local(nb), b: local(p1), width: width))
-                f.bridges.append(.init(a: local(top), b: local(p2), width: width))
+            // The notch's own drop, hanging down past the hardware notch as it reaches.
+            let bulge = CGRect(x: n.minX + 6, y: n.minY - 10 * u, width: n.width - 12, height: n.height + 10 * u)
+            f.blobs.append(.init(id: "notch", rect: local(bulge), radius: min(bulge.height / 2, 14)))
+            if phase == .merging {
+                f.blobs.append(.init(id: "drop", rect: local(d), radius: dropRadius.x))
+                let inset = min(Self.rim, d.width * 0.06)
+                f.content = local(d).insetBy(dx: inset, dy: inset)
+                f.contentRadius = max(4, dropRadius.x - inset)
+                f.contentAlpha = Double(max(0, min(1, contentAlpha.x)))
             }
-        case .idle:
-            break
+            appendArm(&f, notch: bulge, target: d, u: u)
         }
         goo.frame = f
+    }
+
+    /// The neck between two drops: beads of glass along the line between them, fat at the ends and
+    /// thinning in the middle as it stretches, like water does just before it breaks.
+    private func appendNeck(_ f: inout GooFrame, from a: Drop?, to b: Drop) {
+        guard let a else { return }
+        let r = retract.x
+        guard r < 0.98 else { return }
+        let ra = min(a.rect.width, a.rect.height) * 0.4
+        let rb = min(min(b.rect.width, b.rect.height) * 0.4, ra * 1.6)
+        let p = max(0, min(1, pinch.x))
+        let n = 12
+        for i in 0...n {
+            let s0 = CGFloat(i) / CGFloat(n)
+            // After the break, each half slides back into its own drop.
+            let s = s0 < 0.5 ? s0 * (1 - r) : 1 - (1 - s0) * (1 - r)
+            let mid = 1 - pow(2 * s0 - 1, 2) // 0 at the ends, 1 in the middle
+            var rad = (ra + (rb - ra) * s0) * (1 - p * mid * 1.05) * (1 - r)
+            if broken, abs(s0 - 0.5) < 0.09 { rad = 0 }
+            guard rad > 1.2 else { continue }
+            let c = CGPoint(x: a.cx.x + (b.cx.x - a.cx.x) * s, y: a.cy.x + (b.cy.x - a.cy.x) * s)
+            f.blobs.append(.init(id: "neck\(i)", rect: local(CGRect(x: c.x - rad, y: c.y - rad, width: 2 * rad, height: 2 * rad)), radius: rad))
+        }
+    }
+
+    /// The notch's arm reaching for the window (and the window's for the notch). Far away they're
+    /// two bumps; close, the middle fills in and they become one stream.
+    private func appendArm(_ f: inout GooFrame, notch: CGRect, target: CGRect, u: CGFloat) {
+        let a = CGPoint(x: notch.midX, y: notch.minY + 4)
+        let b = CGPoint(x: target.midX, y: target.maxY - 6)
+        let end = 6 + 16 * u
+        let fill = max(0, min(1, (u - 0.3) / 0.4)) // 0 → two separate bumps, 1 → joined
+        let n = 14
+        for i in 0...n {
+            let s = CGFloat(i) / CGFloat(n)
+            let fromEnd = min(s, 1 - s) * 2 // 0 at the ends, 1 in the middle
+            let bump = max(0, 1 - fromEnd / max(0.05, 0.3 + 0.5 * u)) // how far each end's bump reaches
+            let rad = end * max(bump, fill * (0.55 + 0.25 * (1 - fromEnd)))
+            guard rad > 1.2 else { continue }
+            let c = CGPoint(x: a.x + (b.x - a.x) * s, y: a.y + (b.y - a.y) * s)
+            f.blobs.append(.init(id: "arm\(i)", rect: local(CGRect(x: c.x - rad, y: c.y - rad, width: 2 * rad, height: 2 * rad)), radius: rad))
+        }
     }
 
     // MARK: Overlay window
@@ -645,9 +826,12 @@ struct PiPView: View {
         VideoCard(cornerRadius: 14)
             .overlay { controls.opacity(hover ? 1 : 0) }
             .overlay(alignment: .bottom) { note }
-            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(.white.opacity(0.12), lineWidth: 1))
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .padding(4)
+            // A rim of the same Liquid Glass the water is made of.
+            .glassEffect(.clear.tint(.white.opacity(0.04)), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
             .contentShape(Rectangle())
-            .onHover { h in withAnimation(.easeOut(duration: 0.18)) { hover = h } }
+            .onHover { h in withAnimation(.easeOut(duration: 0.2)) { hover = h } }
             .onTapGesture(count: 2) { player.openPlayer() }
             .gesture(DragGesture(minimumDistance: 2, coordinateSpace: .global)
                 .onChanged { _ in model.pip.windowDragChanged() }
@@ -655,84 +839,104 @@ struct PiPView: View {
             .onChange(of: model.video.aspect) { model.pip.fitAspect() }
             .onChange(of: model.video.hasFrame) { model.pip.fitAspect() }
             .onChange(of: player.hasTrack) { _, has in if !has { model.pip.close() } }
-            .onDisappear { model.video.release("pip") }
+            .environment(\.colorScheme, .dark)
     }
 
     private var controls: some View {
         ZStack {
-            LinearGradient(colors: [.black.opacity(0.45), .clear, .black.opacity(0.35)], startPoint: .top, endPoint: .bottom)
-            VStack {
-                HStack {
+            LinearGradient(stops: [.init(color: .black.opacity(0.5), location: 0), .init(color: .clear, location: 0.35),
+                                   .init(color: .clear, location: 0.6), .init(color: .black.opacity(0.55), location: 1)],
+                           startPoint: .top, endPoint: .bottom)
+            VStack(spacing: 0) {
+                HStack(spacing: 8) {
                     chip("xmark", help: "Close") { model.pip.close() }
-                    Spacer()
-                    chip("pip.exit", help: "Back to the notch") { model.pip.merge() }
+                    Text(player.title)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.9))
+                        .lineLimit(1)
+                        .frame(maxWidth: .infinity)
+                    chip("pip.exit", help: "Back to the Notch") { model.pip.merge() }
                 }
-                Spacer()
+                Spacer(minLength: 0)
+                ProgressBar(player: player, tint: .white)
+                    .padding(.horizontal, 6)
             }
-            .padding(8)
-            HStack(spacing: 22) {
-                ControlButton(symbol: "backward.fill", size: 17) { player.previous() }
-                ControlButton(symbol: player.isPlaying ? "pause.fill" : "play.fill", size: 24) { player.playPause() }
-                    .contentTransition(.symbolEffect(.replace))
-                ControlButton(symbol: "forward.fill", size: 17) { player.next() }
+            .padding(10)
+            GlassEffectContainer(spacing: 10) {
+                HStack(spacing: 14) {
+                    round("backward.fill", size: 15, box: 38) { player.previous() }
+                    round(player.isPlaying ? "pause.fill" : "play.fill", size: 21, box: 50) { player.playPause() }
+                    round("forward.fill", size: 15, box: 38) { player.next() }
+                }
             }
-            .shadow(color: .black.opacity(0.4), radius: 6)
         }
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    private func round(_ symbol: String, size: CGFloat, box: CGFloat, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: size, weight: .semibold))
+                .foregroundStyle(.white)
+                .contentTransition(.symbolEffect(.replace))
+                .frame(width: box, height: box)
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .glassEffect(.clear.interactive(), in: Circle())
     }
 
     private func chip(_ symbol: String, help: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: symbol)
-                .font(.system(size: 11, weight: .bold))
+                .font(.system(size: 10.5, weight: .bold))
                 .foregroundStyle(.white)
-                .frame(width: 24, height: 24)
-                .background(Circle().fill(.black.opacity(0.45)))
+                .frame(width: 26, height: 26)
                 .contentShape(Circle())
         }
-        .buttonStyle(PressStyle())
+        .buttonStyle(.plain)
+        .glassEffect(.clear.interactive(), in: Circle())
         .help(help)
     }
 
     @ViewBuilder private var note: some View {
         if player.source == .web, let text = noteText {
-            VStack(spacing: 6) {
+            VStack(spacing: 7) {
                 Text(text)
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.system(size: 11.5, weight: .medium))
                     .multilineTextAlignment(.center)
                     .foregroundStyle(.white)
-                if model.video.status == .protected {
+                switch model.video.status {
+                case .protected:
                     Button("Use the Browser's Picture in Picture") {
                         model.video.nativePictureInPicture()
                         model.pip.close()
                     }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
-                } else if model.video.status == .noPermission {
+                    .buttonStyle(.glassProminent).controlSize(.small)
+                case .noPermission:
                     Button("Open Screen Recording Settings") {
                         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") {
                             NSWorkspace.shared.open(url)
                         }
                     }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
+                    .buttonStyle(.glassProminent).controlSize(.small)
+                case .noExtension:
+                    Button("Turn On in Safari") { model.video.openExtensionSettings() }
+                        .buttonStyle(.glassProminent).controlSize(.small)
+                default: EmptyView()
                 }
             }
-            .padding(10)
+            .padding(12)
             .frame(maxWidth: .infinity)
-            .background(.black.opacity(0.6))
+            .background(.black.opacity(0.55))
         }
     }
 
     private var noteText: String? {
-        let safari = player.webBundleID?.hasPrefix("com.apple.Safari") ?? true
         switch model.video.status {
-        case .noPermission: return "Allow Pergola to record the screen to show the video here."
-        case .noJavaScript:
-            return safari
-                ? "To show the video, turn on Safari › Settings › Developer › Allow JavaScript from Apple Events."
-                : "To show the video, turn on View › Developer › Allow JavaScript from Apple Events in your browser."
-        case .protected: return "This video is protected, so it can't be shown here."
+        case .noPermission: return "Pergola needs Screen Recording permission to show the video."
+        case .noExtension: return "Turn on the Pergola extension in Safari to show the video here."
+        case .noJavaScript: return "Turn on View › Developer › Allow JavaScript from Apple Events in your browser to show the video."
+        case .protected: return "This video is protected, so only the browser can show it."
         default: return nil
         }
     }

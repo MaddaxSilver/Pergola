@@ -45,6 +45,23 @@ cp "$MRA/bin/mediaremote-adapter.pl" "$APP/Contents/Resources/"
 
 IDENTITY="${SIGN_ID:-$(security find-identity -v -p codesigning 2>/dev/null | awk '/Apple Development/ {print $2; exit}')}"
 codesign --force --sign "${IDENTITY:--}" "$FW"
+
+# Safari extension (SafariExtension/): reports where the playing video is on the page, for
+# picture in picture. Turned on by you in Safari › Settings › Extensions.
+EXT="$APP/Contents/PlugIns/PergolaSafari.appex"
+mkdir -p "$EXT/Contents/MacOS" "$EXT/Contents/Resources"
+for ARCH in arm64 x86_64; do
+    swiftc -O -parse-as-library -application-extension -module-name PergolaSafari \
+        -target "$ARCH-apple-macos26.0" SafariExtension/Handler.swift \
+        -framework SafariServices -Xlinker -e -Xlinker _NSExtensionMain \
+        -o "build/PergolaSafari-$ARCH"
+done
+lipo -create build/PergolaSafari-arm64 build/PergolaSafari-x86_64 -output "$EXT/Contents/MacOS/PergolaSafari"
+rm -f build/PergolaSafari-arm64 build/PergolaSafari-x86_64
+cp SafariExtension/Info.plist "$EXT/Contents/Info.plist"
+cp -R SafariExtension/Resources/ "$EXT/Contents/Resources/"
+sips -s format png -Z 128 "$APP/Contents/Resources/AppIcon.icns" --out "$EXT/Contents/Resources/icon.png" >/dev/null
+codesign --force --sign "${IDENTITY:--}" --entitlements SafariExtension/Extension.entitlements "$EXT"
 codesign --force --sign "${IDENTITY:--}" "$APP"
 echo "Built $APP (signed with ${IDENTITY:-ad-hoc})"
 

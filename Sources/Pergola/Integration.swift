@@ -21,6 +21,8 @@ final class PergolaAPI {
     }
 
     private(set) var port: Int?
+    /// Reports from the Safari extension about the video on the page; the reply goes back to it.
+    @ObservationIgnored var onVideoReport: (([String: Any]) -> [String: Any])?
     @ObservationIgnored private let activities: Activities
     @ObservationIgnored private var listener: NWListener?
     @ObservationIgnored private let queue = DispatchQueue(label: "pergola.api")
@@ -110,7 +112,12 @@ final class PergolaAPI {
     private func route(_ r: HTTPRequest) -> (Int, Any?, [String: String]) {
         // Web pages must not be able to poke this from a browser: they always send an Origin, and a
         // page that re-points its own domain at 127.0.0.1 still sends its own Host.
-        if r.headers["origin"] != nil { return (403, ["error": "Browser requests are not allowed"], [:]) }
+        // The one exception: Pergola's own Safari extension reporting where a video is (POST /video).
+        if let origin = r.headers["origin"] {
+            guard origin.hasPrefix("safari-web-extension://"), r.method == "POST", r.path == "/video" else {
+                return (403, ["error": "Browser requests are not allowed"], [:])
+            }
+        }
         let host = (r.headers["host"] ?? "").split(separator: ":").first.map(String.init) ?? ""
         guard ["127.0.0.1", "localhost"].contains(host) else { return (403, ["error": "Bad Host"], [:]) }
         if r.method == "POST", !(r.headers["content-type"] ?? "").lowercased().contains("application/json") {
@@ -141,6 +148,8 @@ final class PergolaAPI {
         case ("POST", "activity", 1):
             guard let a = activities.upsert(body ?? [:]) else { return (400, ["error": "\"id\" is required"]) }
             return (200, a.json)
+        case ("POST", "video", 1):
+            return (200, onVideoReport?(body ?? [:]) ?? [:])
         case ("DELETE", "activity", 2):
             return activities.remove(id: parts[1]) ? (200, ["ok": true]) : (404, ["error": "No such activity"])
         default:

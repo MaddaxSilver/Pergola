@@ -3,6 +3,7 @@ import SwiftUI
 @preconcurrency import ScreenCaptureKit
 import CoreMedia
 import QuartzCore
+import SafariServices
 
 /// Mirrors the video that's playing in a browser tab, live, by copying just the video's rectangle
 /// out of the browser window with ScreenCaptureKit. The page is asked (through Apple Events
@@ -14,7 +15,7 @@ import QuartzCore
 /// asks the browser for its own picture-in-picture instead.
 @Observable @MainActor
 final class VideoMirror {
-    enum Status: Equatable, Error { case off, starting, live, noPermission, noJavaScript, noVideo, protected }
+    enum Status: Equatable, Error { case off, starting, live, noPermission, noJavaScript, noExtension, noVideo, protected }
 
     private(set) var status: Status = .off
     /// Width ÷ height of the video picture.
@@ -32,6 +33,20 @@ final class VideoMirror {
     @ObservationIgnored private var lastSurface: IOSurface?
     @ObservationIgnored private var askedPermission = false
     @ObservationIgnored private var checking = false
+    /// What Pergola's Safari extension last said about each tab.
+    @ObservationIgnored private var tabs: [Int: TabReport] = [:]
+    @ObservationIgnored private var pendingCommand: (tab: Int, command: String)?
+    /// Whether the Safari extension is switched on (nil until asked).
+    @ObservationIgnored private(set) var extensionEnabled: Bool?
+
+    static let extensionID = "com.pergola.Pergola.SafariExtension"
+
+    private struct TabReport {
+        var spot: Spot?
+        var playing: Bool
+        var visible: Bool
+        var at: Date
+    }
 
     /// Where the video is: in which browser window (CG coordinates) and where inside it (points).
     private struct Spot: Equatable {
@@ -102,9 +117,16 @@ final class VideoMirror {
             guard CGPreflightScreenCaptureAccess() else { return }
             status = .starting
         }
+        if Self.isSafari(bundleID) {
+            checkExtension()
+            if let best = bestTab() { apply(.success(best)); return }
+            // No word from the extension: fall back to asking Safari directly, if that's allowed.
+            if extensionEnabled == true { apply(.failure(.noVideo)); return }
+        }
         checking = true
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let found = Self.locate(in: bundleID)
+            var found = Self.locate(in: bundleID)
+            if Self.isSafari(bundleID), case .failure(.noJavaScript) = found { found = .failure(.noExtension) }
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
                     guard let self else { return }
@@ -169,8 +191,8 @@ final class VideoMirror {
     private static func configuration(for spot: Spot) -> SCStreamConfiguration {
         let c = SCStreamConfiguration()
         c.sourceRect = spot.video
-        // Twice the points for Retina, but no bigger than a 1280-wide picture: it's shown small.
-        let scale = min(2, 1280 / max(spot.video.width, 1))
+        // Full Retina resolution (up to a 2560-wide picture), so it stays sharp even made big.
+        let scale = min(NSScreen.screens.map(\.backingScaleFactor).max() ?? 2, 2560 / max(spot.video.width, 1))
         c.width = max(2, Int(spot.video.width * scale))
         c.height = max(2, Int(spot.video.height * scale))
         c.minimumFrameInterval = CMTime(value: 1, timescale: 30)
@@ -192,11 +214,75 @@ final class VideoMirror {
         CATransaction.commit()
     }
 
+    // MARK: Safari extension
+
+    nonisolated static func isSafari(_ id: String) -> Bool { id.hasPrefix("com.apple.Safari") }
+
+    private func checkExtension() {
+        SFSafariExtensionManager.getStateOfSafariExtension(withIdentifier: Self.extensionID) { state, _ in
+            let on = state?.isEnabled ?? false
+            DispatchQueue.main.async { MainActor.assumeIsolated { self.extensionEnabled = on } }
+        }
+    }
+
+    func openExtensionSettings() {
+        SFSafariApplication.showPreferencesForExtension(withIdentifier: Self.extensionID) { _ in }
+    }
+
+    /// The tab to mirror: a visible one that's playing, else any visible one with a video.
+    private func bestTab() -> Spot? {
+        let fresh = tabs.values.filter { Date().timeIntervalSince($0.at) < 5 && $0.visible && $0.spot != nil }
+        return (fresh.first { $0.playing } ?? fresh.max { $0.at < $1.at })?.spot
+    }
+
+    /// A report from the extension (through Pergola's local API). Returns its reply.
+    func report(_ j: [String: Any]) -> [String: Any] {
+        extensionEnabled = true
+        let tab = (j["tab"] as? Int) ?? -1
+        func num(_ k: String) -> CGFloat? { (j[k] as? NSNumber).map { CGFloat($0.doubleValue) } }
+        var spot: Spot?
+        if j["gone"] == nil, let x = num("x"), let y = num("y"), let w = num("w"), let h = num("h"),
+           let iw = num("innerWidth"), let ih = num("innerHeight"), let ow = num("outerWidth"), let oh = num("outerHeight"),
+           let sx = num("screenX"), let sy = num("screenY") {
+            // CSS pixels → points: page zoom is the device pixel ratio over the screen's own scale.
+            let primary = NSScreen.screens.first?.frame.height ?? 0
+            let screen = NSScreen.screens.first { $0.frame.contains(CGPoint(x: sx + 5, y: primary - sy - 5)) } ?? NSScreen.main
+            let backing = screen?.backingScaleFactor ?? 2
+            let zoom = max(0.25, (num("dpr") ?? backing) / backing)
+            let x0 = max(0, x), y0 = max(0, y), x1 = min(iw, x + w), y1 = min(ih, y + h)
+            if x1 - x0 > 20, y1 - y0 > 20 {
+                let left = max(0, ow - iw * zoom), top = max(0, oh - ih * zoom)
+                spot = Spot(window: CGRect(x: sx, y: sy, width: ow, height: oh),
+                            video: CGRect(x: left + x0 * zoom, y: top + y0 * zoom, width: (x1 - x0) * zoom, height: (y1 - y0) * zoom),
+                            protected: (j["protected"] as? Bool) ?? false)
+            }
+        }
+        if j["gone"] != nil { tabs[tab] = nil } else {
+            tabs[tab] = TabReport(spot: spot, playing: (j["playing"] as? Bool) ?? false,
+                                  visible: (j["visible"] as? Bool) ?? true, at: Date())
+        }
+        tabs = tabs.filter { Date().timeIntervalSince($0.value.at) < 30 }
+        // Follow scrolling and resizing right away rather than at the next check.
+        if !users.isEmpty, let bundleID, Self.isSafari(bundleID), status != .noPermission {
+            if let best = bestTab() { apply(.success(best)) } else if stream != nil { apply(.failure(.noVideo)) }
+        }
+        if let p = pendingCommand, p.tab == tab || tabs[p.tab] == nil {
+            pendingCommand = nil
+            return ["command": p.command]
+        }
+        return [:]
+    }
+
     // MARK: Native picture-in-picture (protected video)
 
     /// Asks the browser to pop its own video out into macOS picture-in-picture.
     func nativePictureInPicture() {
         guard let bundleID else { return }
+        if Self.isSafari(bundleID), extensionEnabled == true {
+            let tab = tabs.first { $0.value.visible && $0.value.playing }?.key ?? tabs.keys.first ?? -1
+            pendingCommand = (tab, "pip")
+            return
+        }
         DispatchQueue.global(qos: .userInitiated).async {
             let js = "(function(){var v=[].slice.call(document.querySelectorAll('video')).filter(function(x){return !x.paused})[0];if(!v)return '';if(v.webkitSetPresentationMode){v.webkitSetPresentationMode('picture-in-picture')}else if(v.requestPictureInPicture){v.requestPictureInPicture()}return 'ok'})()"
             _ = Self.runJavaScript(js, in: bundleID)
@@ -336,6 +422,8 @@ struct VideoSurface: NSViewRepresentable {
         let layer = CALayer()
         layer.contentsGravity = .resizeAspectFill
         layer.masksToBounds = true
+        layer.magnificationFilter = .linear
+        layer.minificationFilter = .trilinear
         v.layer = layer
         v.wantsLayer = true
         mirror.attach(layer)
