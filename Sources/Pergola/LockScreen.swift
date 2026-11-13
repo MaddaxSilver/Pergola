@@ -56,6 +56,16 @@ enum SkyLight {
         _ = add(cid, space, [NSNumber(value: window.windowNumber)] as CFArray, 7)
         return true
     }
+
+    private typealias RemoveWindows = @convention(c) (Int32, CFArray, CFArray) -> Int32
+
+    /// Takes `window` back out of the private space at `level`, so it's an ordinary window again
+    /// (drawn under things like the system's drag picture). Reverse of `move`.
+    static func remove(_ window: NSWindow, fromLevel level: Int32) {
+        guard let space = spaces[level], let main = fn("SLSMainConnectionID", MainConnection.self),
+              let remove = fn("SLSRemoveWindowsFromSpaces", RemoveWindows.self) else { return }
+        _ = remove(main(), [NSNumber(value: window.windowNumber)] as CFArray, [NSNumber(value: space)] as CFArray)
+    }
 }
 
 // MARK: - Controller

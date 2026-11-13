@@ -135,7 +135,6 @@ final class AppModel {
     let output = OutputWatcher()
     let activities = Activities()
     @ObservationIgnored private(set) lazy var liquid = LiquidTray(model: self)
-    let dragGhost = DragGhost()
     @ObservationIgnored private(set) lazy var api = PergolaAPI(activities: activities)
     @ObservationIgnored private lazy var live = LiveWatcher(activities: activities)
 

@@ -221,7 +221,7 @@ final class NotchWindowController {
                 }
             }
             // Only touch the drag pasteboard when the button is released, not 120 times a second.
-            if wasMouseDown { idleDragCount = dragPasteboard.changeCount; if !model.dragGhost.parts.isEmpty { model.dragGhost.parts = [] } }
+            if wasMouseDown { idleDragCount = dragPasteboard.changeCount }
             wasMouseDown = false
             draggingFiles = false
             return
@@ -425,33 +425,7 @@ final class NotchHostingView: NSHostingView<AnyView> {
         info.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
     }
 
-    /// The notch draws above every window, the system's drag picture included, so files dragged over
-    /// it would slide underneath. Pergola draws an exact copy of the drag picture (read from the drag
-    /// itself, at the same place) on top of the notch instead.
-    private func updateGhost(_ sender: NSDraggingInfo) {
-        guard let model else { return }
-        var parts: [DragGhost.Part] = []
-        sender.enumerateDraggingItems(options: [], for: self, classes: [NSPasteboardItem.self], searchOptions: [:]) { item, _, _ in
-            let origin = item.draggingFrame.origin
-            for c in item.imageComponents ?? [] {
-                let frame = c.frame.offsetBy(dx: origin.x, dy: origin.y)
-                if let image = c.contents as? NSImage {
-                    parts.append(.init(image: image, frame: frame))
-                } else if let contents = c.contents, CFGetTypeID(contents as CFTypeRef) == CGImage.typeID {
-                    let cg = contents as! CGImage
-                    parts.append(.init(image: NSImage(cgImage: cg, size: frame.size), frame: frame))
-                }
-            }
-        }
-        // Frames are in this view's flipped (top-left) coordinates, the same as the notch's SwiftUI view.
-        if !isFlipped { parts = parts.map { .init(image: $0.image, frame: CGRect(x: $0.frame.minX, y: bounds.height - $0.frame.maxY, width: $0.frame.width, height: $0.frame.height)) } }
-        model.dragGhost.parts = parts
-    }
-
-    private func clearGhost() { model?.dragGhost.parts = [] }
-
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
-        updateGhost(sender)
         guard let model, Prefs.d.bool(forKey: Prefs.trayEnabled), !fileURLs(sender).isEmpty else { return [] }
         withAnimation(Motion.content) {
             model.ui.bigArt = false
@@ -462,21 +436,16 @@ final class NotchHostingView: NSHostingView<AnyView> {
     }
 
     override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
-        updateGhost(sender)
-        return model?.ui.dropTargeted == true ? .copy : []
+        model?.ui.dropTargeted == true ? .copy : []
     }
 
-    override func draggingEnded(_ sender: NSDraggingInfo) { clearGhost() }
-
     override func draggingExited(_ sender: NSDraggingInfo?) {
-        clearGhost()
         withAnimation(.easeOut(duration: 0.15)) { model?.ui.dropTargeted = false }
     }
 
     override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool { true }
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
-        clearGhost()
         let urls = fileURLs(sender)
         guard let model, !urls.isEmpty else { return false }
         withAnimation(.spring(duration: 0.35, bounce: 0.25)) {

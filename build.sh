@@ -54,6 +54,8 @@ if [[ "${1:-}" == "--install" ]]; then
     rm -rf /Applications/Pergola.app
     ditto "$APP" /Applications/Pergola.app
     echo "Installed /Applications/Pergola.app"
-    # Installing quits the running copy; start the new one straight away.
-    open /Applications/Pergola.app
+    # Installing quits the running copy; start the new one once the old one is fully gone.
+    for _ in 1 2 3 4 5 6 7 8 9 10; do pgrep -x Pergola >/dev/null || break; sleep 0.3; done
+    sleep 0.5
+    open /Applications/Pergola.app || { sleep 1; open /Applications/Pergola.app; }
 fi

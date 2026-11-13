@@ -197,26 +197,3 @@ struct TrayTile: View {
     }
 }
 
-/// A copy of the system's drag picture, drawn over the notch while files are dragged across it.
-@Observable @MainActor
-final class DragGhost {
-    struct Part { var image: NSImage; var frame: CGRect }
-    var parts: [Part] = []
-}
-
-struct DragGhostView: View {
-    let ghost: DragGhost
-
-    var body: some View {
-        ZStack(alignment: .topLeading) {
-            ForEach(Array(ghost.parts.enumerated()), id: \.offset) { _, part in
-                Image(nsImage: part.image)
-                    .resizable()
-                    .frame(width: part.frame.width, height: part.frame.height)
-                    .offset(x: part.frame.minX, y: part.frame.minY)
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .allowsHitTesting(false)
-    }
-}
