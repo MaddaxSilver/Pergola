@@ -2,7 +2,6 @@ import Foundation
 import Network
 import Observation
 import AppKit
-import ImageIO
 
 /// Pergola's door for other apps: a tiny HTTP API on this Mac only (127.0.0.1), plus an MCP server on
 /// the same port at /mcp. See INTEGRATIONS.md for the full reference.
@@ -22,9 +21,6 @@ final class PergolaAPI {
     }
 
     private(set) var port: Int?
-    /// Reports from the Safari extension about the video on the page; the reply goes back to it.
-    @ObservationIgnored var onVideoReport: (([String: Any]) -> [String: Any])?
-    @ObservationIgnored var onVideoDebug: (() -> [String: Any])?
     @ObservationIgnored private let activities: Activities
     @ObservationIgnored private var listener: NWListener?
     @ObservationIgnored private let queue = DispatchQueue(label: "pergola.api")
@@ -87,10 +83,8 @@ final class PergolaAPI {
             guard let self else { c.cancel(); return }
             var buffer = buffer
             if let data { buffer.append(data) }
-            guard buffer.count <= 4_194_304 else { self.reply(c, 413, ["error": "Request too large"]); return }
+            guard buffer.count <= 1_048_576 else { self.reply(c, 413, ["error": "Request too large"]); return }
             if let request = HTTPRequest(buffer) {
-                // Video frames (up to 30 a second) are handled right here, decoded off the main thread.
-                if request.path.hasPrefix("/video/frame") { self.handleFrame(c, request); return }
                 DispatchQueue.main.async {
                     let (status, body, headers) = MainActor.assumeIsolated { self.route(request) }
                     self.reply(c, status, body, headers)
@@ -100,26 +94,6 @@ final class PergolaAPI {
             } else {
                 self.read(c, buffer: buffer)
             }
-        }
-    }
-
-    /// Where page video frames go. Set up by the video mirror; used from the API's own queue.
-    nonisolated let frames = FrameSink()
-
-    /// POST /video/frame: a JPEG of the playing video, sent by Pergola's Safari extension.
-    private nonisolated func handleFrame(_ c: NWConnection, _ r: HTTPRequest) {
-        let origin = r.headers["origin"] ?? ""
-        guard origin.hasPrefix("safari-web-extension://") else {
-            reply(c, 403, ["error": "Not allowed"]); return
-        }
-        let cors = ["Access-Control-Allow-Origin": origin.isEmpty ? "*" : origin, "Access-Control-Allow-Methods": "POST",
-                    "Access-Control-Allow-Headers": "Content-Type", "Access-Control-Max-Age": "600"]
-        if r.method == "OPTIONS" { reply(c, 200, nil, cors); return }
-        frames.receive(r.body)
-        // The page sends its next frame as soon as this reply arrives, so the reply sets the pace.
-        let wait = frames.nextTick()
-        queue.asyncAfter(deadline: .now() + wait) { [frames] in
-            self.reply(c, 200, ["frames": frames.wanted], cors)
         }
     }
 
@@ -136,20 +110,7 @@ final class PergolaAPI {
     private func route(_ r: HTTPRequest) -> (Int, Any?, [String: String]) {
         // Web pages must not be able to poke this from a browser: they always send an Origin, and a
         // page that re-points its own domain at 127.0.0.1 still sends its own Host.
-        // The one exception: Pergola's own Safari extension reporting where a video is (POST /video).
-        if let origin = r.headers["origin"] {
-            Log.media.info("api \(r.method, privacy: .public) \(r.path, privacy: .public) origin=\(origin, privacy: .public)")
-            guard origin.hasPrefix("safari-web-extension://"), r.method == "POST" || r.method == "OPTIONS",
-                  r.path == "/video" || r.path == "/video/frame" else {
-                return (403, ["error": "Browser requests are not allowed"], [:])
-            }
-            // Answered with CORS headers, so the extension needs no extra site permission to reach us.
-            let cors = ["Access-Control-Allow-Origin": origin, "Access-Control-Allow-Methods": "POST",
-                        "Access-Control-Allow-Headers": "Content-Type"]
-            if r.method == "OPTIONS" { return (200, nil, cors) }
-            let json = (try? JSONSerialization.jsonObject(with: r.body)) as? [String: Any] ?? [:]
-            return (200, onVideoReport?(json) ?? [:], cors)
-        }
+        if r.headers["origin"] != nil { return (403, ["error": "Browser requests are not allowed"], [:]) }
         let host = (r.headers["host"] ?? "").split(separator: ":").first.map(String.init) ?? ""
         guard ["127.0.0.1", "localhost"].contains(host) else { return (403, ["error": "Bad Host"], [:]) }
         if r.method == "POST", !(r.headers["content-type"] ?? "").lowercased().contains("application/json") {
@@ -180,10 +141,6 @@ final class PergolaAPI {
         case ("POST", "activity", 1):
             guard let a = activities.upsert(body ?? [:]) else { return (400, ["error": "\"id\" is required"]) }
             return (200, a.json)
-        case ("GET", "video", 1):
-            return (200, onVideoDebug?() ?? [:])
-        case ("POST", "video", 1):
-            return (200, onVideoReport?(body ?? [:]) ?? [:])
         case ("DELETE", "activity", 2):
             return activities.remove(id: parts[1]) ? (200, ["ok": true]) : (404, ["error": "No such activity"])
         default:
@@ -611,63 +568,6 @@ enum ClaudeSetup {
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + Double(steps.count) * 1.6) {
             activities.upsert(["id": id, "state": "done", "detail": "Finished"])
-        }
-    }
-}
-
-/// Turns incoming video frames into images off the main thread, and hands only the newest one over.
-final class FrameSink: @unchecked Sendable {
-    private let lock = NSLock()
-    private var _wanted = false
-    private var pending = false
-    private(set) var received = 0, dropped = 0
-    /// Called on the main thread with each new frame (nil image = the page can't be read: protected).
-    var deliver: (@MainActor (CGImage?) -> Void)?
-
-    var wanted: Bool {
-        get { lock.lock(); defer { lock.unlock() }; return _wanted }
-        set { lock.lock(); _wanted = newValue; lock.unlock() }
-    }
-
-    private var lastTick = Date.distantPast
-
-    /// Seconds to hold a reply so frames come at most 30 a second.
-    func nextTick() -> TimeInterval {
-        lock.lock(); defer { lock.unlock() }
-        let now = Date()
-        let due = max(now, lastTick.addingTimeInterval(1.0 / 30))
-        lastTick = due
-        return due.timeIntervalSince(now)
-    }
-
-    func receive(_ body: Data) {
-        guard wanted, !body.isEmpty else { return }
-        lock.lock(); received += 1; lock.unlock()
-        if body.first == UInt8(ascii: "{") {
-            if let j = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any], j["frameError"] != nil {
-                DispatchQueue.main.async { MainActor.assumeIsolated { self.deliver?(nil) } }
-            }
-            return
-        }
-        // Raw JPEG bytes, or (through the extension) a data URL, optionally after "tab|".
-        var data = body
-        if body.starts(with: Data("data:".utf8)) || body.firstIndex(of: UInt8(ascii: "|")).map({ $0 < 24 }) == true,
-           let comma = body.firstIndex(of: UInt8(ascii: ",")) {
-            guard let decoded = Data(base64Encoded: body[body.index(after: comma)...]) else { return }
-            data = decoded
-        }
-        // If the screen hasn't taken the last frame yet, this one is dropped rather than queued.
-        lock.lock()
-        if pending { dropped += 1; lock.unlock(); return }
-        pending = true
-        lock.unlock()
-        guard let src = CGImageSourceCreateWithData(data as CFData, nil),
-              let image = CGImageSourceCreateImageAtIndex(src, 0, [kCGImageSourceShouldCacheImmediately: true] as CFDictionary) else {
-            lock.lock(); pending = false; lock.unlock(); return
-        }
-        DispatchQueue.main.async {
-            self.lock.lock(); self.pending = false; self.lock.unlock()
-            MainActor.assumeIsolated { self.deliver?(image) }
         }
     }
 }

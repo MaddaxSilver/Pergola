@@ -153,7 +153,6 @@ struct NotchRootView: View {
         // hardware notch, melting into glass along the bottom.
         let drop = dropShown
         let glass = (ui.expanded || drop) && liquidGlass
-        let glassAmount: Double = 1
         let art = ui.expanded && ui.bigArt
         let size = bodySize
         // The "Clear Glass ↔ Dark" slider (0.15…0.95) drives the whole look:
@@ -178,7 +177,7 @@ struct NotchRootView: View {
                           start: glass && art ? 0 : fadeStart, end: 1)
                 Color.clear
                     .glassEffect(art ? .regular : .clear, in: shape)
-                    .opacity(glass ? glassAmount : 0)
+                    .opacity(glass ? 1 : 0)
                 if art {
                     ArtWash(image: model.player.artwork)
                         .transition(.opacity)
@@ -186,7 +185,7 @@ struct NotchRootView: View {
                 // Solid black on top of the glass: everything above `fadeStart`, easing out to nothing
                 // just before the bottom edge, so the glass only shows where the pill meets the desktop.
                 // Closed it's solid; opening, its lower part eases away to reveal the glass.
-                BlackFade(top: art ? 0 : 1, bottom: ui.expanded || drop ? 1 - glassAmount : 1,
+                BlackFade(top: art ? 0 : 1, bottom: ui.expanded || drop ? 0 : 1,
                           // Open, the fade is short and ends early, leaving a clear band of glass along the bottom.
                           start: fadeStart + (drop ? 0 : span * 0.1), end: fadeStart + span * (drop ? 0.5 : 0.62))
                 if art {

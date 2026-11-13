@@ -17,8 +17,6 @@ let package = Package(
                 .linkedFramework("ServiceManagement"),
                 .linkedFramework("IOBluetooth"),
                 .linkedFramework("EventKit"),
-                .linkedFramework("SafariServices"),
-                .linkedFramework("ScreenCaptureKit"),
             ]
         )
     ]

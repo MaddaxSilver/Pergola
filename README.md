@@ -12,15 +12,12 @@ build it yourself.
 - **Media**: album art, title, scrubber and controls for Music and Spotify, a live waveform drawn
   from the player's own audio, synced lyrics, and a large album-art view. YouTube, SoundCloud and
   other players in your browser show up too, with play, pause, skip and the progress bar.
-- **Picture in picture**: drag the art down out of the notch and it stretches like water, its neck
-  thinning until it pinches off into a floating Liquid Glass window playing the browser's video (or
-  the album art for music). Throw it to a corner, pinch to resize, or drag it back up: the notch
-  reaches for it and swallows it. Click the art to play the video inside the open notch. In Safari,
-  turn on the Pergola extension (Safari › Settings › Extensions) so Pergola can find the video.
 - **Calendar**: a week strip you can tap through, with each day's events and a Join button for
   Zoom, Meet, Teams, Webex and FaceTime links.
 - **Weather**: current conditions and the next hours, from your location or a city you type.
-- **Files tray**: drag files onto the notch to park them, drag them back out later.
+- **Files tray**: drag files onto the notch to park them, drag them back out later. Files leave the
+  open notch as drops of Liquid Glass that stretch and pinch off its edge, and the edge reaches out
+  for files you bring to it.
 - **Live activities**: any app, script or AI agent on your Mac can show a task and its progress.
   Claude Code, ChatGPT / Codex, Gemini, Cursor and others each get their own mark. Click a task to
   jump to its app. See [INTEGRATIONS.md](INTEGRATIONS.md).
@@ -63,9 +60,8 @@ Each is asked for only when a feature needs it, and every feature can be switche
 | Permission | Used for |
 |---|---|
 | Automation (Music / Spotify) | Reading what's playing, play/pause/skip |
-| Automation (your browser) | Only while the browser uses the microphone: checking whether a tab is on a call site. In Chrome and similar, for picture in picture: finding where the video sits on the page (also needs "Allow JavaScript from Apple Events") |
-| Safari extension (Pergola Picture in Picture) | Picture in picture: hands Pergola the playing video's frames (only while it's shown, and only to Pergola on this Mac). Nothing else about the page is sent |
-| Screen & System Audio Recording | Live waveform (only the music app, only while playing); picture in picture in browsers other than Safari (only the video, only while shown) |
+| Automation (your browser) | Only while the browser uses the microphone: checking whether a tab is on a call site |
+| Screen & System Audio Recording | Live waveform (only the music app, only while playing) |
 | Accessibility | Taking over the volume and brightness keys |
 | Full Disk Access | Reading Focus mode names |
 | Bluetooth | AirPods battery |

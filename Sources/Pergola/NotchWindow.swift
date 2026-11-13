@@ -119,6 +119,7 @@ final class NotchWindowController {
         let c = canvasSize
         panel.setFrame(NSRect(x: s.frame.midX - c.width / 2, y: s.frame.maxY - c.height,
                               width: c.width, height: c.height), display: true)
+        ui.panelFrame = panel.frame
     }
 
     /// The area (screen coordinates) that counts as "on the notch" while collapsed.
@@ -216,9 +217,10 @@ final class NotchWindowController {
                     model.tray.add(urls)
                     ui.dropTargeted = false
                 }
+                model.liquid.gulp()
             }
             // Only touch the drag pasteboard when the button is released, not 120 times a second.
-            if wasMouseDown { idleDragCount = dragPasteboard.changeCount }
+            if wasMouseDown { idleDragCount = dragPasteboard.changeCount; model.liquid.endReach() }
             wasMouseDown = false
             draggingFiles = false
             return
@@ -235,6 +237,8 @@ final class NotchWindowController {
             ui.tab = .tray
             setExpanded(true)
         }
+        // Below the open tray, its edge reaches out for the files.
+        if ui.expanded, ui.tab == .tray { model.liquid.reach(toward: NSEvent.mouseLocation) }
         let over = ui.expanded && ui.tab == .tray && expandedHotRect.contains(NSEvent.mouseLocation)
         if over != ui.dropTargeted { withAnimation(.easeOut(duration: 0.15)) { ui.dropTargeted = over } }
     }
@@ -448,6 +452,7 @@ final class NotchHostingView: NSHostingView<AnyView> {
             model.tray.add(urls)
             model.ui.dropTargeted = false
         }
+        model.liquid.gulp()
         if Prefs.d.bool(forKey: Prefs.haptics) {
             NSHapticFeedbackManager.defaultPerformer.perform(.levelChange, performanceTime: .now)
         }

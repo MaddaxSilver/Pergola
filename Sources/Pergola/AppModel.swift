@@ -60,10 +60,10 @@ final class NotchUI {
     var bigArtLyrics = Prefs.d.bool(forKey: Prefs.bigArtLyrics) {
         didSet { Prefs.d.set(bigArtLyrics, forKey: Prefs.bigArtLyrics) }
     }
-    /// The player's art has been grabbed and is being pulled out as picture in picture.
-    var artLifted = false
-    /// The enlarged view shows a browser's video rather than album art (no lyrics beside it).
-    var bigVideo = false
+    /// The tray file being dragged out as a drop of water (its tile steps aside meanwhile).
+    var liftedTrayItem: UUID?
+    /// Where the notch's window is on screen (to place things drawn outside it).
+    var panelFrame: CGRect = .zero
     /// The lock screen's enlarged album-art view.
     var lockBig = false
     /// Files are being dragged over the open notch.
@@ -108,7 +108,7 @@ final class NotchUI {
 
     /// Size of the expanded panel, not counting the flared top corners.
     var expandedSize: CGSize {
-        if bigArt { return CGSize(width: bigArtLyrics && !bigVideo ? 620 : 420, height: notchSize.height + 270) }
+        if bigArt { return CGSize(width: bigArtLyrics ? 620 : 420, height: notchSize.height + 270) }
         return CGSize(width: Self.pagerWidth, height: notchSize.height + 118 + extraTaskHeight)
     }
     /// The largest the open notch ever gets (sizes the window once, so it never has to resize).
@@ -134,8 +134,7 @@ final class AppModel {
     let focus = FocusWatcher()
     let output = OutputWatcher()
     let activities = Activities()
-    let video = VideoMirror()
-    @ObservationIgnored private(set) lazy var pip = PiPController(model: self)
+    @ObservationIgnored private(set) lazy var liquid = LiquidTray(model: self)
     @ObservationIgnored private(set) lazy var api = PergolaAPI(activities: activities)
     @ObservationIgnored private lazy var live = LiveWatcher(activities: activities)
 
@@ -203,10 +202,6 @@ final class AppModel {
         // set up makes AppKit throw.
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in self?.activities.restore() }
         ui.trayIsEmpty = { [weak self] in self?.tray.items.isEmpty ?? true }
-        api.onVideoReport = { [weak self] report in self?.video.report(report) ?? [:] }
-        api.onVideoDebug = { [weak self] in self?.video.debugInfo ?? [:] }
-        video.sink = api.frames
-        video.elapsed = { [weak self] in self?.player.currentPosition() ?? 0 }
         api.setEnabled(Prefs.d.bool(forKey: Prefs.activitiesEnabled))
         sensory.start()
         focus.start()
@@ -245,7 +240,6 @@ final class AppModel {
                 self?.activities.prune()
                 self?.live.tick()
                 self?.reconcileCall()
-                if let self { let v = self.player.source == .web; if self.ui.bigVideo != v { self.ui.bigVideo = v } }
             }
         }
     }

@@ -143,6 +143,7 @@ struct TrayTile: View {
     @Environment(AppModel.self) private var model
     var item: TrayItem
     @State private var hovering = false
+    @State private var frame = CGRect.zero
 
     var body: some View {
         let url = item.url
@@ -172,10 +173,18 @@ struct TrayTile: View {
                 .offset(x: 2, y: -2)
             }
         }
+        .opacity(model.ui.liftedTrayItem == item.id ? 0.25 : 1)
         .onHover { hovering = $0 }
+        .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame = $0 }
         .onDrag {
             guard let url else { return NSItemProvider() }
+            // The file leaves as a drop of water drawn by Pergola, so the system's drag picture is hidden.
+            let panel = model.ui.panelFrame
+            let iconRect = CGRect(x: panel.minX + frame.midX - 20, y: panel.maxY - frame.minY - 4 - 40, width: 40, height: 40)
+            model.liquid.beginDragOut(item.id, icon: NSWorkspace.shared.icon(forFile: url.path), slot: iconRect)
             return NSItemProvider(contentsOf: url) ?? NSItemProvider()
+        } preview: {
+            Color.clear.frame(width: 1, height: 1)
         }
         .onTapGesture(count: 2) { if let url { NSWorkspace.shared.open(url) } }
         .contextMenu {

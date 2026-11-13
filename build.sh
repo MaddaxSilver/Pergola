@@ -15,11 +15,6 @@ cp Resources/Info.plist "$APP/Contents/Info.plist"
 # Render the app icon from code (Sources/Pergola/Icons.swift).
 "$BIN" --write-icon "$APP/Contents/Resources/AppIcon.icns"
 
-# The water's warp shader (Shaders/Liquid.metal).
-xcrun metal -c Shaders/Liquid.metal -o build/Liquid.air
-xcrun metallib build/Liquid.air -o "$APP/Contents/Resources/Liquid.metallib"
-rm -f build/Liquid.air
-
 # Browser music: MediaRemote Adapter (BSD-3-Clause, ThirdParty/mediaremote-adapter) reads what any app,
 # browsers included, reports as now playing. macOS only lets Apple's own programs ask, so Pergola runs it
 # inside /usr/bin/perl. Built here as a small framework next to the script that loads it.
@@ -50,29 +45,6 @@ cp "$MRA/bin/mediaremote-adapter.pl" "$APP/Contents/Resources/"
 
 IDENTITY="${SIGN_ID:-$(security find-identity -v -p codesigning 2>/dev/null | awk '/Apple Development/ {print $2; exit}')}"
 codesign --force --sign "${IDENTITY:--}" "$FW"
-
-# Safari extension (SafariExtension/): reports where the playing video is on the page, for
-# picture in picture. Turned on by you in Safari › Settings › Extensions.
-EXT="$APP/Contents/PlugIns/PergolaSafari.appex"
-mkdir -p "$EXT/Contents/MacOS" "$EXT/Contents/Resources"
-for ARCH in arm64 x86_64; do
-    swiftc -O -parse-as-library -application-extension -module-name PergolaSafari \
-        -target "$ARCH-apple-macos26.0" SafariExtension/Handler.swift \
-        -framework SafariServices -Xlinker -e -Xlinker _NSExtensionMain \
-        -o "build/PergolaSafari-$ARCH"
-done
-lipo -create build/PergolaSafari-arm64 build/PergolaSafari-x86_64 -output "$EXT/Contents/MacOS/PergolaSafari"
-rm -f build/PergolaSafari-arm64 build/PergolaSafari-x86_64
-cp SafariExtension/Info.plist "$EXT/Contents/Info.plist"
-cp -R SafariExtension/Resources/ "$EXT/Contents/Resources/"
-# A new version every build, so Safari treats each Pergola update as an extension update (and the
-# extension re-attaches itself to the tabs that are already open).
-EXTVER="1.$(( $(date +%s) / 86400 % 60000 )).$(( $(date +%s) % 86400 / 2 ))"
-sed -i '' "s/\"version\": \"[0-9.]*\"/\"version\": \"$EXTVER\"/" "$EXT/Contents/Resources/manifest.json"
-plutil -replace CFBundleShortVersionString -string "$EXTVER" "$EXT/Contents/Info.plist"
-plutil -replace CFBundleVersion -string "$EXTVER" "$EXT/Contents/Info.plist"
-sips -s format png -Z 128 "$APP/Contents/Resources/AppIcon.icns" --out "$EXT/Contents/Resources/icon.png" >/dev/null
-codesign --force --sign "${IDENTITY:--}" --entitlements SafariExtension/Extension.entitlements "$EXT"
 codesign --force --sign "${IDENTITY:--}" "$APP"
 echo "Built $APP (signed with ${IDENTITY:-ad-hoc})"
 
