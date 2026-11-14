@@ -655,15 +655,11 @@ private struct ActivityRow: View {
             ActivityGlyph(activity: activity, size: 15)
                 .frame(width: 26, height: 26)
             VStack(alignment: .leading, spacing: 1) {
-                Text(activity.title)
-                    .font(.system(size: 12.5, weight: .semibold))
-                    .lineLimit(1)
+                // Too long to fit, the title and detail scroll across.
+                ScrollingText(text: activity.title, font: .systemFont(ofSize: 12.5, weight: .semibold), color: .white)
                 if !activity.detail.isEmpty {
-                    Text(activity.detail)
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(.white.opacity(0.55))
-                        .lineLimit(1)
-                        .contentTransition(.opacity)
+                    ScrollingText(text: activity.detail, font: .systemFont(ofSize: 11, weight: .medium),
+                                  color: NSColor(white: 1, alpha: 0.55))
                 }
             }
             Spacer(minLength: 6)

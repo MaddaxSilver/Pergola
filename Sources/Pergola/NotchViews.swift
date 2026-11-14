@@ -346,7 +346,8 @@ struct CollapsedView: View {
             EmptyView()
         case .activity(let title, let status, let state):
             HStack(spacing: 6) {
-                label(title)
+                ScrollingText(text: title, font: .systemFont(ofSize: 12.5, weight: .semibold),
+                              color: NSColor(white: 1, alpha: 0.88), pause: 0.9)
                 label(status, tint: Self.tint(for: state)).layoutPriority(1)
             }
         case .sensory(let kind, let level, let muted):
