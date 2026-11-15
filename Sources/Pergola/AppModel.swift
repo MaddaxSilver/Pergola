@@ -289,8 +289,14 @@ final class AppModel {
         if case .coin(let heads, let toss) = ui.peek { (heads, toss) } else { nil }
     }
 
-    /// Width of each wing beside the closed notch: wider while one holds a running clock.
-    var closedWingWidth: CGFloat { coin != nil || activities.current?.hasClock == true ? 46 : ui.wingWidth }
+    /// Width of each wing beside the closed notch: wider while one holds a running clock, as wide as
+    /// the album art when music shows, and otherwise only just wider than a task's icon and ring,
+    /// so the closed notch hugs the real one.
+    var closedWingWidth: CGFloat {
+        if coin != nil || activities.current?.hasClock == true { return 46 }
+        if showsMusicWings { return ui.wingWidth }
+        return 25
+    }
 
     private func reconcileWaveform() {
         waveform.update(
