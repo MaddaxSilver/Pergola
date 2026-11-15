@@ -166,7 +166,10 @@ final class AppModel {
             self.showPeek(.charging(percent: self.battery.percent, charging: self.battery.charging))
         }
         connections.onChange = { [weak self] name, symbol, on in
-            guard let self, Prefs.d.bool(forKey: Prefs.connectionOverlay), self.allowedDuringFocus(Prefs.focusShowsAccessories) else { return }
+            guard let self else { return }
+            let allowed = Prefs.d.bool(forKey: Prefs.connectionOverlay) && self.allowedDuringFocus(Prefs.focusShowsAccessories)
+            Log.connections.notice("connection \(name, privacy: .public) on=\(on) shown=\(allowed && !self.ui.expanded) focus=\(self.focus.active != nil) open=\(self.ui.expanded)")
+            guard allowed else { return }
             self.showPeek(.connection(name: name, symbol: symbol, on: on))
         }
         connections.start()

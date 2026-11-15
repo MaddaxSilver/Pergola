@@ -70,7 +70,7 @@ final class USBDevices {
             IORegistryEntryGetRegistryEntryID(service, &id)
             let device = Self.describe(service)
             present[id] = device
-            Log.connections.info("usb added \(device?.name ?? "(skipped)", privacy: .public)")
+            Log.connections.notice("usb added \(device?.name ?? "(skipped)", privacy: .public)")
         }
         scheduleSettle()
     }
@@ -81,7 +81,7 @@ final class USBDevices {
             var id: UInt64 = 0
             IORegistryEntryGetRegistryEntryID(service, &id)
             guard let entry = present.removeValue(forKey: id) else { continue }
-            Log.connections.info("usb removed \(entry?.name ?? "(skipped)", privacy: .public)")
+            Log.connections.notice("usb removed \(entry?.name ?? "(skipped)", privacy: .public)")
         }
         scheduleSettle()
     }
@@ -117,10 +117,10 @@ final class USBDevices {
         guard Date() >= quietUntil else { return }
         // Something new plugged in is the news; if only things went, say that.
         if let first = arrived.first {
-            Log.connections.info("usb announce connected \(first.name, privacy: .public) (+\(arrived.count - 1))")
+            Log.connections.notice("usb announce connected \(first.name, privacy: .public) (+\(arrived.count - 1))")
             onChange?(Self.together(first.name, arrived.count), first.symbol, true)
         } else if let first = left.first {
-            Log.connections.info("usb announce gone \(first.name, privacy: .public) (+\(left.count - 1))")
+            Log.connections.notice("usb announce gone \(first.name, privacy: .public) (+\(left.count - 1))")
             onChange?(Self.together(first.name, left.count), first.symbol, false)
         }
     }
