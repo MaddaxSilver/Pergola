@@ -659,7 +659,7 @@ private struct AccessoriesPage: View {
                 ToggleRow(title: "Output Change", isOn: $outputOverlay, divider: true)
                 ToggleRow(title: "Connections", isOn: $connectionOverlay, divider: true)
             }
-            Footnote(text: "Accessory Connect shows AirPods and other Bluetooth devices with their battery when they connect. Output Change shows where your audio is playing when it switches. Connections shows a VPN, your iPhone's Personal Hotspot or a display (by cable or AirPlay) connecting and disconnecting.")
+            Footnote(text: "Accessory Connect shows AirPods and other Bluetooth devices with their battery when they connect. Output Change shows where your audio is playing when it switches. Connections shows a VPN, your iPhone's Personal Hotspot, a display (by cable or AirPlay) or a USB device connecting and disconnecting.")
             DurationCard(seconds: $seconds, range: 2...8)
         }
     }

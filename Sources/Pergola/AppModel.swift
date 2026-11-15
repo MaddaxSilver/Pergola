@@ -247,6 +247,8 @@ final class AppModel {
                 case "charging": .charging(percent: 66, charging: true)
                 case "vpn": .connection(name: "VPN", symbol: "lock.shield.fill", on: true)
                 case "hotspot": .connection(name: "Personal Hotspot", symbol: "personalhotspot", on: true)
+                case "usb": .connection(name: "Samsung T7 Shield", symbol: "externaldrive.fill", on: true)
+                case "usb-off": .connection(name: "iPhone", symbol: "iphone", on: false)
                 default: .sensory(.volume, level: 0.44, muted: false)
                 }
                 self?.showPeek(peek, seconds: 60)

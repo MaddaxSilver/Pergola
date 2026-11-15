@@ -26,7 +26,7 @@ build it yourself.
   the running time, a button that mutes your Mac's microphone, and one that brings the call forward.
 - **Goal rings**: an app can share up to four goals, drawn as rings on their own page.
 - **Overlays**: volume, brightness, battery (with time until full), AirPods, sound output, Focus,
-  VPN, Personal Hotspot and display connections, song changes and task updates each appear as one
+  VPN, Personal Hotspot, display and USB connections, song changes and task updates each appear as one
   line under the notch.
 - **Lock screen**: a player and widgets on the lock screen.
 
@@ -95,7 +95,7 @@ off in Settings › Integrations.
 | Variable | Effect |
 |---|---|
 | `PERGOLA_PIN_EXPANDED=1` | Keep the notch open (`PERGOLA_TAB=player|weather|tray|calendar`) |
-| `PERGOLA_PEEK=volume|brightness|focus|output|airpods|charging|vpn|hotspot|coin` | Show that overlay for 60 s |
+| `PERGOLA_PEEK=volume|brightness|focus|output|airpods|charging|vpn|hotspot|usb|usb-off|coin` | Show that overlay for 60 s |
 | `PERGOLA_LOCK_PREVIEW=1` | Show the lock-screen layout over the desktop |
 | `PERGOLA_SETTINGS_PAGE=<page>` | Open Settings on a page |
 | `PERGOLA_POP_DEMO=1` | With the Files page open, the first file pops every two seconds (it stays in the tray) |

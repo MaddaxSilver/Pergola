@@ -1,9 +1,10 @@
 import AppKit
 import Network
 
-/// Notices a VPN, an iPhone's Personal Hotspot or a display (cable or AirPlay) connecting and
-/// disconnecting, and says so in a line under the notch. Needs no permissions: VPNs and the hotspot
-/// are read from the Mac's own network interfaces, displays from the screen list.
+/// Notices a VPN, an iPhone's Personal Hotspot, a display (cable or AirPlay) or a USB device
+/// connecting and disconnecting, and says so in a line under the notch. Needs no permissions: VPNs
+/// and the hotspot are read from the Mac's own network interfaces, displays from the screen list,
+/// USB devices from IOKit (see USBDevices).
 @MainActor
 final class Connections {
     var onChange: ((_ name: String, _ symbol: String, _ on: Bool) -> Void)?
@@ -13,6 +14,7 @@ final class Connections {
     private var hotspot = false
     private var screens: [CGDirectDisplayID: String] = [:]
     private var started = false
+    private let usb = USBDevices()
 
     func start() {
         guard !started else { return }
@@ -30,6 +32,9 @@ final class Connections {
                 DispatchQueue.main.async { MainActor.assumeIsolated { self?.update(vpn: state.vpn, hotspot: state.hotspot) } }
             }
         }
+        usb.onChange = { [weak self] name, symbol, on in self?.onChange?(name, symbol, on) }
+        usb.start()
+
         monitor.start(queue: DispatchQueue(label: "com.pergola.connections", qos: .utility))
 
         NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification,

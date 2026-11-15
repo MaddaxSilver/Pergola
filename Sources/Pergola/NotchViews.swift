@@ -375,8 +375,11 @@ struct CollapsedView: View {
         case .connection(let name, let symbol, let on):
             HStack(spacing: 6) {
                 glyph(symbol, tint: on ? Self.connectionTint : .white.opacity(0.45))
-                label(on ? name : "\(name) Off", tint: on ? .white.opacity(0.88) : .white.opacity(0.55))
+                // A VPN or the hotspot is switched off; a device or display is disconnected.
+                let switched = name == "VPN" || name == "Personal Hotspot"
+                label(on || !switched ? name : "\(name) Off", tint: on ? .white.opacity(0.88) : .white.opacity(0.55))
                 if on { label("Connected", tint: Self.connectionTint) }
+                else if !switched { label("Disconnected", tint: .white.opacity(0.45)) }
             }
         case .accessory(let acc):
             HStack(spacing: 6) {
