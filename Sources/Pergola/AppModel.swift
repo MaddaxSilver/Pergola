@@ -295,7 +295,7 @@ final class AppModel {
     var closedWingWidth: CGFloat {
         if coin != nil || activities.current?.hasClock == true { return 46 }
         if showsMusicWings { return ui.wingWidth }
-        return 25
+        return 26
     }
 
     private func reconcileWaveform() {
