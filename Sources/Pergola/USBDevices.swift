@@ -5,11 +5,15 @@ import os
 /// Notices USB devices being plugged in and taken out (an iPhone, a drive, a keyboard, a dock), for the
 /// Connections line under the notch. Needs no permissions: macOS tells any app about USB devices.
 ///
+/// Devices don't arrive cleanly: an iPhone attaches, drops off a tenth of a second later and attaches
+/// again over a second after that (and does the same when it's unlocked or trusted). So nothing is said
+/// per event. Once USB has been quiet for a moment, what's plugged in is compared with what was last
+/// shown, and only the difference is announced.
+///
 ///  • What was plugged in before Pergola started isn't announced.
 ///  • Hubs and the Mac's own built-in parts are skipped.
 ///  • A dock brings several devices at once: they're shown as one line ("CalDigit TS4 and 3 more").
-///  • A device that drops off and comes straight back (an iPhone being unlocked, a flaky cable)
-///    isn't announced either way.
+///  • A device that drops off and comes back within the quiet moment isn't announced either way.
 @MainActor
 final class USBDevices {
     var onChange: ((_ name: String, _ symbol: String, _ on: Bool) -> Void)?
@@ -21,14 +25,11 @@ final class USBDevices {
     private var removed: io_iterator_t = 0
     /// Every USB device present, by registry ID (also the ones not worth announcing, as nil).
     private var present: [UInt64: Device?] = [:]
-    private var arriving: [UInt64] = []
-    private var leaving: [Device] = []
-    private var arriveWork: DispatchWorkItem?
-    private var leaveWork: DispatchWorkItem?
-    /// When each device (by vendor, product and serial) was last taken out.
-    private var goneAt: [String: Date] = [:]
-    /// Devices whose "Disconnected" was shown, so coming back is news again.
-    private var announcedGone: Set<String> = []
+    /// The devices the user was last told about (by vendor, product and serial), in the order they came.
+    private var shown: [String: Device] = [:]
+    private var settle: DispatchWorkItem?
+    /// How long USB must stay quiet before anything is said: longer than an iPhone's re-attach.
+    private static let quietTime = 2.0
     /// Everything re-attaches when the Mac wakes; that isn't news.
     private var quietUntil = Date()
 
@@ -40,7 +41,7 @@ final class USBDevices {
 
         IOServiceAddMatchingNotification(port, kIOFirstMatchNotification, IOServiceMatching("IOUSBHostDevice"), { refcon, iterator in
             guard let refcon else { return }
-            MainActor.assumeIsolated { Unmanaged<USBDevices>.fromOpaque(refcon).takeUnretainedValue().didAdd(iterator, announce: true) }
+            MainActor.assumeIsolated { Unmanaged<USBDevices>.fromOpaque(refcon).takeUnretainedValue().didAdd(iterator) }
         }, me, &added)
         IOServiceAddMatchingNotification(port, kIOTerminatedNotification, IOServiceMatching("IOUSBHostDevice"), { refcon, iterator in
             guard let refcon else { return }
@@ -55,34 +56,23 @@ final class USBDevices {
         }
 
         // Arm both notifications by reading what's there now; that is only remembered.
-        didAdd(added, announce: false)
+        didAdd(added)
         didRemove(removed)
+        settle?.cancel()
+        settle = nil
+        shown = current()
     }
 
-    private func didAdd(_ iterator: io_iterator_t, announce: Bool) {
+    private func didAdd(_ iterator: io_iterator_t) {
         while case let service = IOIteratorNext(iterator), service != 0 {
             defer { IOObjectRelease(service) }
             var id: UInt64 = 0
             IORegistryEntryGetRegistryEntryID(service, &id)
             let device = Self.describe(service)
             present[id] = device
-            Log.connections.info("usb added \(device?.name ?? "(skipped)", privacy: .public) announce=\(announce)")
-            guard announce, Date() >= quietUntil, let device else { continue }
-            // Back soon after going (an iPhone re-attaches when unlocked or trusted): it only blinked.
-            // Its pending "Disconnected" is dropped, and nothing is said unless that was already shown.
-            if let gone = goneAt[device.key], Date().timeIntervalSince(gone) < 10, !announcedGone.contains(device.key) {
-                leaving.removeAll { $0.key == device.key }
-                continue
-            }
-            announcedGone.remove(device.key)
-            arriving.append(id)
+            Log.connections.info("usb added \(device?.name ?? "(skipped)", privacy: .public)")
         }
-        guard !arriving.isEmpty else { return }
-        // Wait for the rest of a dock's devices, and for the device to publish what it is.
-        arriveWork?.cancel()
-        let work = DispatchWorkItem { [weak self] in MainActor.assumeIsolated { self?.announceArrivals() } }
-        arriveWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.9, execute: work)
+        scheduleSettle()
     }
 
     private func didRemove(_ iterator: io_iterator_t) {
@@ -91,42 +81,48 @@ final class USBDevices {
             var id: UInt64 = 0
             IORegistryEntryGetRegistryEntryID(service, &id)
             guard let entry = present.removeValue(forKey: id) else { continue }
-            arriving.removeAll { $0 == id }
-            guard let device = entry else { continue }
-            Log.connections.info("usb removed \(device.name, privacy: .public)")
-            goneAt[device.key] = Date()
-            if Date() >= quietUntil { leaving.append(device) }
+            Log.connections.info("usb removed \(entry?.name ?? "(skipped)", privacy: .public)")
         }
-        guard !leaving.isEmpty else { return }
-        leaveWork?.cancel()
-        let work = DispatchWorkItem { [weak self] in MainActor.assumeIsolated { self?.announceDepartures() } }
-        leaveWork = work
-        // Long enough for a device that's only re-attaching to come back first.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 4, execute: work)
+        scheduleSettle()
     }
 
-    private func announceArrivals() {
+    /// Every event restarts the wait, so a burst of them is judged once, after it's over.
+    private func scheduleSettle() {
+        settle?.cancel()
+        let work = DispatchWorkItem { [weak self] in MainActor.assumeIsolated { self?.settled() } }
+        settle = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.quietTime, execute: work)
+    }
+
+    /// The devices plugged in now, by key.
+    private func current() -> [String: Device] {
+        var out: [String: Device] = [:]
+        for case let device? in present.values { out[device.key] = device }
+        return out
+    }
+
+    private func settled() {
+        settle = nil
         // Read each device again now that it has published its interfaces (which say what it is).
-        for id in arriving where present[id] != nil {
+        for (id, entry) in present where entry != nil {
             let service = IOServiceGetMatchingService(kIOMainPortDefault, IORegistryEntryIDMatching(id))
             guard service != 0 else { continue }
             if let fresh = Self.describe(service) { present[id] = fresh }
             IOObjectRelease(service)
         }
-        let devices = arriving.compactMap { present[$0] ?? nil }
-        arriving = []
-        guard let first = devices.first else { return }
-        Log.connections.info("usb announce connected \(first.name, privacy: .public) (+\(devices.count - 1))")
-        onChange?(Self.together(first.name, devices.count), first.symbol, true)
-    }
-
-    private func announceDepartures() {
-        let devices = leaving
-        leaving = []
-        guard let first = devices.first else { return }
-        for d in devices { announcedGone.insert(d.key) }
-        Log.connections.info("usb announce gone \(first.name, privacy: .public) (+\(devices.count - 1))")
-        onChange?(Self.together(first.name, devices.count), first.symbol, false)
+        let now = current()
+        let arrived = now.values.filter { shown[$0.key] == nil }.sorted { $0.name < $1.name }
+        let left = shown.values.filter { now[$0.key] == nil }.sorted { $0.name < $1.name }
+        shown = now
+        guard Date() >= quietUntil else { return }
+        // Something new plugged in is the news; if only things went, say that.
+        if let first = arrived.first {
+            Log.connections.info("usb announce connected \(first.name, privacy: .public) (+\(arrived.count - 1))")
+            onChange?(Self.together(first.name, arrived.count), first.symbol, true)
+        } else if let first = left.first {
+            Log.connections.info("usb announce gone \(first.name, privacy: .public) (+\(left.count - 1))")
+            onChange?(Self.together(first.name, left.count), first.symbol, false)
+        }
     }
 
     private static func together(_ name: String, _ count: Int) -> String {
