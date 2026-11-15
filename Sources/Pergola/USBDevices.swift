@@ -1,5 +1,6 @@
 import AppKit
 import IOKit
+import os
 
 /// Notices USB devices being plugged in and taken out (an iPhone, a drive, a keyboard, a dock), for the
 /// Connections line under the notch. Needs no permissions: macOS tells any app about USB devices.
@@ -26,6 +27,8 @@ final class USBDevices {
     private var leaveWork: DispatchWorkItem?
     /// When each device (by vendor, product and serial) was last taken out.
     private var goneAt: [String: Date] = [:]
+    /// Devices whose "Disconnected" was shown, so coming back is news again.
+    private var announcedGone: Set<String> = []
     /// Everything re-attaches when the Mac wakes; that isn't news.
     private var quietUntil = Date()
 
@@ -63,12 +66,15 @@ final class USBDevices {
             IORegistryEntryGetRegistryEntryID(service, &id)
             let device = Self.describe(service)
             present[id] = device
+            Log.connections.info("usb added \(device?.name ?? "(skipped)", privacy: .public) announce=\(announce)")
             guard announce, Date() >= quietUntil, let device else { continue }
-            // Back within a few seconds of going: it only blinked. Cancel its pending "Disconnected" too.
-            if let gone = goneAt[device.key], Date().timeIntervalSince(gone) < 8 {
+            // Back soon after going (an iPhone re-attaches when unlocked or trusted): it only blinked.
+            // Its pending "Disconnected" is dropped, and nothing is said unless that was already shown.
+            if let gone = goneAt[device.key], Date().timeIntervalSince(gone) < 10, !announcedGone.contains(device.key) {
                 leaving.removeAll { $0.key == device.key }
                 continue
             }
+            announcedGone.remove(device.key)
             arriving.append(id)
         }
         guard !arriving.isEmpty else { return }
@@ -87,6 +93,7 @@ final class USBDevices {
             guard let entry = present.removeValue(forKey: id) else { continue }
             arriving.removeAll { $0 == id }
             guard let device = entry else { continue }
+            Log.connections.info("usb removed \(device.name, privacy: .public)")
             goneAt[device.key] = Date()
             if Date() >= quietUntil { leaving.append(device) }
         }
@@ -94,7 +101,8 @@ final class USBDevices {
         leaveWork?.cancel()
         let work = DispatchWorkItem { [weak self] in MainActor.assumeIsolated { self?.announceDepartures() } }
         leaveWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5, execute: work)
+        // Long enough for a device that's only re-attaching to come back first.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4, execute: work)
     }
 
     private func announceArrivals() {
@@ -108,6 +116,7 @@ final class USBDevices {
         let devices = arriving.compactMap { present[$0] ?? nil }
         arriving = []
         guard let first = devices.first else { return }
+        Log.connections.info("usb announce connected \(first.name, privacy: .public) (+\(devices.count - 1))")
         onChange?(Self.together(first.name, devices.count), first.symbol, true)
     }
 
@@ -115,6 +124,8 @@ final class USBDevices {
         let devices = leaving
         leaving = []
         guard let first = devices.first else { return }
+        for d in devices { announcedGone.insert(d.key) }
+        Log.connections.info("usb announce gone \(first.name, privacy: .public) (+\(devices.count - 1))")
         onChange?(Self.together(first.name, devices.count), first.symbol, false)
     }
 
@@ -141,13 +152,19 @@ final class USBDevices {
             || ["hub", "billboard", "bridge", "host controller", "usb controller", "t2 controller"].contains(where: lower.contains) {
             return nil
         }
-        // A bare "USB Storage" or "Flash Disk" means more with its maker in front.
+        // A vague name ("USB Storage", "Flash Disk", "Receiver") means more with its maker in front;
+        // a real product name ("iPhone", "T7 Shield", "Scarlett 2i2") is left as it is.
         var name = product
-        if !vendor.isEmpty, !lower.contains(vendor.lowercased().split(separator: " ").first.map(String.init) ?? "~"),
-           product.count < 14 || lower.hasPrefix("usb") {
-            name = "\(vendor.replacingOccurrences(of: " Inc.", with: "").replacingOccurrences(of: ",", with: "")) \(product)"
-        }
+        let maker = vendor.replacingOccurrences(of: " Inc.", with: "").replacingOccurrences(of: ",", with: "")
+            .trimmingCharacters(in: .whitespaces)
+        let vague = ["usb", "storage", "disk", "flash", "device", "drive", "receiver", "keyboard", "mouse",
+                     "camera", "audio", "composite", "mass", "gadget", "adapter", "reader"]
         let vid = (property(s, "idVendor") as? NSNumber)?.intValue ?? 0
+        if !maker.isEmpty, vid != 0x05AC, product.count <= 20,
+           vague.contains(where: lower.contains),
+           !lower.contains(maker.lowercased().split(separator: " ").first.map(String.init) ?? "~") {
+            name = "\(maker) \(product)"
+        }
         let pid = (property(s, "idProduct") as? NSNumber)?.intValue ?? 0
         let serial = property(s, "USB Serial Number") as? String ?? "\((property(s, "locationID") as? NSNumber)?.intValue ?? 0)"
         return Device(name: name, symbol: symbol(name: lower, service: s, deviceClass: deviceClass),
