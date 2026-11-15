@@ -86,7 +86,7 @@ struct AIBrand {
     var bundleIDs: [String] = []
 
     static let all: [AIBrand] = [
-        AIBrand(name: "Claude", keys: ["claude", "anthropic"], symbol: "sparkle", tint: "#D97757"),
+        AIBrand(name: "Claude", keys: ["claude", "anthropic"], symbol: ClaudeMark.symbol, tint: "#D97757"),
         AIBrand(name: "ChatGPT", keys: ["chatgpt", "openai", "codex", "gpt"], symbol: "circle.hexagongrid.fill", tint: "#19C37D",
                 bundleIDs: ["com.openai.chat", "com.openai.codex"]),
         AIBrand(name: "Gemini", keys: ["gemini", "google", "bard"], symbol: "sparkles", tint: "#5B9BFF",
@@ -184,7 +184,7 @@ final class Activities {
         if let v = text("app", 60) { a.app = v }
         if let v = text("title", 120) { a.title = v }
         if let v = text("detail", 200) { a.detail = v }
-        if let v = text("symbol", 60), NSImage(systemSymbolName: v, accessibilityDescription: nil) != nil { a.symbol = v }
+        if let v = text("symbol", 60), v == ClaudeMark.symbol || NSImage(systemSymbolName: v, accessibilityDescription: nil) != nil { a.symbol = v }
         if let v = text("tint", 9) { a.tintHex = v }
         if let v = text("bundle_id", 200) { a.bundleID = v }
         if let v = (d["ttl"] as? NSNumber)?.doubleValue { a.ttl = min(86_400, max(5, v)) }
@@ -364,11 +364,18 @@ struct ActivityGlyph: View {
                 // App icons carry their own margin, so they need more room than a symbol to look the same size.
                 .frame(width: size * 1.65, height: size * 1.65)
         } else {
+            // Claude's own starburst (also for Claude tasks posted earlier with the old sparkle).
+            if activity.symbol == ClaudeMark.symbol || (activity.symbol == "sparkle" && AIBrand.match(activity.app)?.name == "Claude") {
+                ClaudeMark()
+                    .fill(activity.tint)
+                    .frame(width: size * 1.25, height: size * 1.25)
+            } else {
             Image(systemName: activity.symbol)
                 .symbolRenderingMode(.hierarchical)
                 .font(.system(size: size * 1.15, weight: .semibold))
                 .foregroundStyle(activity.tint)
                 .contentTransition(.symbolEffect(.replace))
+            }
         }
     }
 }

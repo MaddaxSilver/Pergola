@@ -27,7 +27,7 @@ Fields for `POST /activity` (send `Content-Type: application/json`):
 | `progress` | 0 to 1 (or 0 to 100). Leave out, or send `null`, for a spinner. |
 | `step`, `total_steps` | Alternative to `progress`: steps finished out of a total. |
 | `state` | `running` (default), `waiting` (needs the user), `done`, `failed`. Done and failed show for 5 seconds, then go. |
-| `symbol` | SF Symbol name for the icon. |
+| `symbol` | SF Symbol name for the icon, or `claude` for Claude's starburst. |
 | `bundle_id` | Show this app's own icon instead of a symbol. |
 | `tint` | Ring colour as hex, e.g. `#34C759`. |
 | `ttl` | Seconds without an update before a running activity is dropped (default 600). |

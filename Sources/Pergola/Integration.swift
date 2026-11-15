@@ -388,7 +388,7 @@ enum ClaudeHook {
         let project = (hook["cwd"] as? String).map { URL(fileURLWithPath: $0).lastPathComponent } ?? ""
         var plan = Plan.load(session)
 
-        var body: [String: Any] = ["id": id, "app": "Claude", "symbol": "sparkle", "tint": "#D97757", "ttl": 660,
+        var body: [String: Any] = ["id": id, "app": "Claude", "symbol": ClaudeMark.symbol, "tint": "#D97757", "ttl": 660,
                                    "title": project.isEmpty || project.count > 28 ? "Claude" : "Claude · \(project)"]
         if let transcript = hook["transcript_path"] as? String { body["transcript"] = transcript }
         // The app this session lives in (Claude's desktop app, Terminal, an editor…): a click on the task opens it.
