@@ -291,9 +291,12 @@ struct CollapsedView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 0) {
-                leftWing.frame(width: model.closedWingWidth, height: ui.notchSize.height)
+                // The icons keep their place beside the notch; the wing's last point of room is on its outer edge.
+                leftWing.frame(width: model.closedWingWidth - 1, height: ui.notchSize.height)
+                    .frame(width: model.closedWingWidth, alignment: .trailing)
                 Spacer(minLength: ui.notchSize.width)
-                rightWing.frame(width: model.closedWingWidth, height: ui.notchSize.height)
+                rightWing.frame(width: model.closedWingWidth - 1, height: ui.notchSize.height)
+                    .frame(width: model.closedWingWidth, alignment: .leading)
             }
             .frame(height: ui.notchSize.height)
 
