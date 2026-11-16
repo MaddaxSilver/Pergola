@@ -153,6 +153,9 @@ final class LockScreenController {
         guard let screen = NSScreen.screens.first(where: { $0.safeAreaInsets.top > 0 }) ?? NSScreen.main else { return }
         WallpaperBackdrop.shared.refresh(for: screen)
         let w = window ?? makeWindow()
+        // The preview sits just above ordinary windows, where screenshots can see it (the real one
+        // is at the shielding level, which they can't).
+        w.level = preview ? .statusBar : NSWindow.Level(rawValue: Int(CGShieldingWindowLevel()))
         w.setFrame(screen.frame, display: true)
         if !preview, !delegated {
             delegated = SkyLight.moveToLockScreen(w)
@@ -373,11 +376,25 @@ struct LockArt: View {
     var size: CGFloat
     var radius: CGFloat
     var glass: Bool
+    /// Show the whole cover in its own shape (wider or taller covers aren't cropped to a square);
+    /// `size` is then its longer side.
+    var wholeCover = false
+
+    /// The art's frame: square, or the cover's own proportions when it's shown whole.
+    static func frame(for image: NSImage?, size: CGFloat, wholeCover: Bool) -> CGSize {
+        guard wholeCover, let image, image.size.width > 0, image.size.height > 0 else { return CGSize(width: size, height: size) }
+        // Within reason: a strip or a sliver would look broken, so very odd shapes are still cropped.
+        let ratio = min(1.6, max(1 / 1.6, image.size.width / image.size.height))
+        return ratio >= 1 ? CGSize(width: size, height: (size / ratio).rounded())
+                          : CGSize(width: (size * ratio).rounded(), height: size)
+    }
 
     var body: some View {
         let player = model.player
+        let frame = Self.frame(for: player.artwork, size: size, wholeCover: wholeCover)
         ArtworkView(image: player.artwork, cornerRadius: radius)
-            .frame(width: size, height: size)
+            .frame(width: frame.width, height: frame.height)
+            .animation(.spring(duration: 0.5, bounce: 0.15), value: frame)
             .overlay {
                 if glass {
                     RoundedRectangle(cornerRadius: radius, style: .continuous)
@@ -437,11 +454,12 @@ struct LockBigArtView: View {
         // every track change while the next song's lyrics are fetched.
         let hasLyrics = model.lyrics.hasSynced || model.lyrics.plain != nil || model.lyrics.loading
         let showLyrics = lyricsOn && hasLyrics
+        let artFrame = LockArt.frame(for: player.artwork, size: 490, wholeCover: true)
         // Only the art column and the lyrics are centred on screen; the two side buttons float just
         // left of the art, and the lyrics line up with the middle of the art (not the whole column).
         return HStack(alignment: .artMiddle, spacing: showLyrics ? 72 : 0) {
             VStack(spacing: 16) {
-                LockArt(size: 490, radius: 37, glass: glassArt)
+                LockArt(size: 490, radius: 37, glass: glassArt, wholeCover: true)
                     .alignmentGuide(.artMiddle) { $0[VerticalAlignment.center] }
                     .scaleEffect(player.isPlaying ? 1 : 0.94)
                     .animation(.spring(duration: 0.55, bounce: 0.3), value: player.isPlaying)
@@ -475,7 +493,7 @@ struct LockBigArtView: View {
             .frame(width: 490)
             .overlay(alignment: .topLeading) {
                 sideControls
-                    .frame(height: 490)
+                    .frame(height: artFrame.height)
                     .alignmentGuide(.leading) { $0.width + 30 }
             }
             if showLyrics {

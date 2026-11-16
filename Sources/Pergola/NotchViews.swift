@@ -303,7 +303,7 @@ struct CollapsedView: View {
             // Every overlay arrives the same way: one line that drops down from under the notch.
             if let peek = ui.peek, peek.dropsDown(apple: ui.appleStyleSensory) {
                 dropLine(peek)
-                    .frame(height: NotchUI.dropHeight - 4)
+                    .frame(height: NotchUI.dropHeight) // the whole line, so the words sit evenly in it
                     .padding(.horizontal, 12)
                     .transition(.riseFromBelow)
             }
