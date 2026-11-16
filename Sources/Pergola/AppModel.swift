@@ -238,7 +238,7 @@ final class AppModel {
         output.start()
         if Prefs.d.bool(forKey: Prefs.calendarEnabled) { agenda.start() }
 
-        // Debug: PERGOLA_PEEK=volume|brightness|focus|output|airpods|charging shows that overlay for 60 s.
+        // Debug: PERGOLA_PEEK=volume|brightness|focus|output|airpods|charging|usb|claude|claude-long shows that overlay for 60 s.
         if let which = ProcessInfo.processInfo.environment["PERGOLA_PEEK"] {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
                 if which == "coin" { self?.flipCoin(); return }
@@ -252,6 +252,8 @@ final class AppModel {
                 case "hotspot": .connection(name: "Personal Hotspot", symbol: "personalhotspot", on: true)
                 case "usb": .connection(name: "Samsung T7 Shield", symbol: "externaldrive.fill", on: true)
                 case "usb-off": .connection(name: "iPhone", symbol: "iphone", on: false)
+                case "claude": .activity(title: "Claude · Pergola", status: "Needs you", state: .waiting)
+                case "claude-long": .activity(title: "Claude · Pergola is checking the lock screen art and the overlay line", status: "Running", state: .running)
                 default: .sensory(.volume, level: 0.44, muted: false)
                 }
                 self?.showPeek(peek, seconds: 60)

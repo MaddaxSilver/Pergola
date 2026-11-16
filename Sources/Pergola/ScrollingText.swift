@@ -129,7 +129,8 @@ final class ScrollingTextView: NSView {
         NSGraphicsContext.current = NSGraphicsContext(cgContext: ctx, flipped: false)
         let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: color]
         for i in 0..<copies {
-            (text as NSString).draw(at: CGPoint(x: CGFloat(i) * (textSize.width + Self.gap), y: -font.descender), withAttributes: attrs)
+            // The point is the line's bottom-left corner (descenders included), not the baseline.
+            (text as NSString).draw(at: CGPoint(x: CGFloat(i) * (textSize.width + Self.gap), y: 0), withAttributes: attrs)
         }
         NSGraphicsContext.restoreGraphicsState()
         strip.contents = ctx.makeImage()
